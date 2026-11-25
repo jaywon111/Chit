@@ -60,7 +60,7 @@ code, pre, .mono-input, .code-input { font-family: var(--mono); font-variant-num
 .status-dot { display: inline-block; flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
 .network-indicator { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 7px; min-width: 0; color: var(--muted); font: 10px/1.6 var(--mono); font-variant-numeric: tabular-nums; }
 .network-indicator > span:not(.status-dot):not(.sr-only) { min-width: 0; overflow-wrap: anywhere; }
-.network-state { border-left: 1px solid var(--line); padding-left: 8px; font-size: 9px; line-height: 1.6; letter-spacing: .25px; }
+.network-state { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0; min-width: 0; border-left: 1px solid var(--line); padding-left: 8px; font-size: 9px; line-height: 1.6; letter-spacing: .25px; }
 .network-live { color: var(--green); }
 .network-live .status-dot { background: var(--emerald); }
 .network-checking .status-dot { background: var(--amber); }
@@ -388,7 +388,7 @@ summary { cursor: pointer; }
 .diff-explanation { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .chain-evidence-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; min-width: 0; padding: 22px 0 12px; color: var(--muted); font: 10px/1.7 var(--mono); letter-spacing: .25px; }
 .chain-evidence-heading > span { min-width: 0; }
-.evidence-origin { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; padding: 3px 6px; border: 1px solid var(--line); color: var(--muted); font-size: 9px; line-height: 1.7; }
+.evidence-origin { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; padding: 3px 6px; border: 1px solid var(--line); color: var(--muted); font-size: 9px; line-height: 1.7; }
 .evidence-metrics, .file-fingerprint-meta { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; min-width: 0; border: 1px solid var(--line); }
 .evidence-metrics > div, .file-fingerprint-meta > div { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 14px; }
 .evidence-metrics > div + div, .file-fingerprint-meta > div + div { border-top: 1px solid var(--line); }
@@ -408,7 +408,7 @@ summary { cursor: pointer; }
 .proof-check > div { display: grid; gap: 4px; min-width: 0; }
 .proof-check strong { display: block; font: 11px/1.8 var(--mono); overflow-wrap: anywhere; }
 .proof-check > div > span { display: block; min-width: 0; color: var(--muted); font: 10px/1.9 var(--mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.check-word { display: inline-flex; align-items: center; justify-content: center; gap: 0; min-width: 0; padding: 2px 5px; border: 1px solid var(--line); color: var(--muted); font: 10px/1.7 var(--mono); }
+.check-word { display: inline-flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 0; min-width: 0; padding: 2px 5px; border: 1px solid var(--line); color: var(--muted); font: 10px/1.7 var(--mono); }
 .check-word.pass { border-color: #bdd0ba; background: #edf5e9; color: var(--green); }
 .proof-check-icon.not-pass ~ .check-word { border-color: #dfbcc5; background: var(--crimson-wash); color: var(--crimson); }
 .raw-evidence { margin-top: 14px; }
@@ -430,7 +430,7 @@ summary { cursor: pointer; }
 .proof-limits p { flex: 1; min-width: 0; font-size: 12px; line-height: 1.9; }
 .proof-limits strong { color: var(--ink); }
 
-/* Local-only drawers: filenames and bytes are never exposed by CSS. */
+/* Local-only drawers and archive: explicitly separated metadata and actions. */
 .utility-deck { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 18px; min-width: 0; margin-top: 28px; }
 .panel.local-file-card, .panel.local-recovery { padding: 0; background: #eeefe6; }
 .local-file-summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: 0; min-height: 68px; padding: 16px 14px; color: var(--ink); font-size: 12px; font-weight: 600; line-height: 1.7; list-style: none; }
@@ -570,6 +570,11 @@ summary { cursor: pointer; }
   .panel { padding: 26px; }
   .ticket { padding-inline: 25px; }
   .ticket-divider { margin-inline: -25px; }
+}
+/* Keep touch controls comfortable in landscape and in the QoreX webview too. */
+@media (pointer: coarse) {
+  .field input, .field select, .field textarea, .field .code-input, .search-input-wrap input, .json-details textarea { font-size: 16px; }
+  .icon-button { min-width: 44px; min-height: 44px; padding: 10px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }

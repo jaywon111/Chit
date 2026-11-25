@@ -81,7 +81,7 @@ export function App(): JSX.Element {
   }
 
   function saveVerified(record: ReceiptRecord): void {
-    try { saveReceipt(record); clearPendingReceipt(record.receipt.receiptCode); } finally { refresh(); }
+    try { saveReceipt(record); clearPendingReceipt(record.receipt.receiptCode, undefined, record); } finally { refresh(); }
   }
 
   function forgetReceipt(record: ReceiptRecord): void {

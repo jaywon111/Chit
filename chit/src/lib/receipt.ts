@@ -146,6 +146,10 @@ export function ensureReceiptStorage(receiptCode: string, storage: ReceiptStorag
 export function saveReceipt(record: ReceiptRecord, storage: ReceiptStorage = browserStorage()): ReceiptRecord[] {
   const clean = createReceiptRecord(record.receipt, record.receiptHash, record.txHash);
   const records = loadReceipts(storage);
+  const pending = loadPendingReceipts(storage).find((entry) => entry.receipt.receiptCode === clean.receipt.receiptCode);
+  if (pending && (pending.receiptHash !== clean.receiptHash || canonicalReceiptJSON(pending.receipt) !== canonicalReceiptJSON(clean.receipt))) {
+    throw new Error("A different unresolved Chit uses this code. Its recovery draft was not changed; export this receipt JSON and resolve the collision locally.");
+  }
   const index = records.findIndex((entry) => entry.receipt.receiptCode === clean.receipt.receiptCode);
   if (index >= 0) {
     if (serializeReceipt(records[index]) !== serializeReceipt(clean)) throw new Error("A different Chit already uses this code. It was not overwritten; export this receipt JSON to preserve it.");
@@ -208,8 +212,18 @@ export function savePendingReceipt(receipt: ReceiptFields, receiptHash: string, 
   return clean;
 }
 
-export function clearPendingReceipt(receiptCode: string, storage: ReceiptStorage = browserStorage()): PendingReceipt[] {
-  const pending = loadPendingReceipts(storage).filter((entry) => entry.receipt.receiptCode !== receiptCode);
+/** Supply the expected fields/hash for automatic recovery; a short code alone is not identity. */
+export function clearPendingReceipt(receiptCode: string, storage: ReceiptStorage = browserStorage(), expected?: Pick<PendingReceipt, "receipt" | "receiptHash">): PendingReceipt[] {
+  const entries = loadPendingReceipts(storage);
+  if (expected) {
+    const receipt = normalizeReceipt(expected.receipt);
+    const receiptHash = normalizeHash(expected.receiptHash);
+    const draft = entries.find((entry) => entry.receipt.receiptCode === receiptCode);
+    if (receipt.receiptCode !== receiptCode || (draft && (draft.receiptHash !== receiptHash || canonicalReceiptJSON(draft.receipt) !== canonicalReceiptJSON(receipt)))) {
+      throw new Error("A different unresolved Chit uses this code. Its recovery draft was not cleared; recover or export the original instead of rebroadcasting.");
+    }
+  }
+  const pending = entries.filter((entry) => entry.receipt.receiptCode !== receiptCode);
   try {
     const serialized = JSON.stringify(pending);
     storage.setItem(PENDING_STORAGE_KEY, serialized);

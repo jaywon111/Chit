@@ -1,16 +1,26 @@
 # Chit
 
-**Little receipt. Lasting proof.** A mobile-friendly, privacy-first imaging-receipt web app for the **QoreChain Quantum Pass** track.
+A mobile-first receipt-integrity instrument for the **QoreChain Quantum Pass** track. Open directly into the Issue / Verify / How It Works workspace—no landing-page funnel or stepper.
 
 Chit creates a small non-identifying receipt, hashes its canonical JSON in the browser, asks **QoreX** for **one native hybrid-signed transaction** (`secp256k1` + `ML-DSA-87`), and compares the receipt with the actual on-chain anchor. No smart contract, backend database, patient account, or EVM authorization window is needed.
 
 The existing application remains in **`chit/`**. Root `package.json` only forwards commands to that inspected starter; no replacement outer app was created. The starter was a Vite + React + TypeScript SDK balance/tokenomics page, **not an existing QoreX wallet/signing implementation**. Its installed `@qorechain/sdk@0.14.0`, Vite proxy, React entrypoint, and real SDK codecs/composers are reused.
 
+## Instrument workspace
+
+- **Issue:** five controlled receipt fields, local SHA-256 preview, one real QoreX signing request, serial-tracked specimen ticket, crisp QR with quiet zone, commitment block, and NIST FIPS 204 · ML-DSA-87 · 4,627 B specification badge. A draft/submission badge is not verification.
+- **Verify:** local-code recovery, strict JSON/text import, self-contained URL-fragment auto-loading, editable tamper simulator, actual side-by-side digests, per-position crimson differences, live block/code/signer/signature/event evidence, and a read-only sample button.
+- **Optional permissioning:** a browser-local authorized issuer list checks the actual single `MsgSend.from_address`; demo entries are not vetted clinic identities.
+- **Local utilities:** optional zero-upload PDF/PNG/JPEG byte fingerprinting and a browser-only receipt archive. Neither a file nor its fingerprint is linked to a receipt anchor by this tool.
+- **UI:** `chit/src/instrument.css` is the active stylesheet. System fonts, warm alabaster/bone, obsidian, surgical forest/emerald, crimson alerts, 1px borders, tabular monospace metrics, compact QoreX header, and safe-area bottom navigation; no remote assets or third-party UI service.
+
 ## Current validation status — important
 
 Implementation, documentation, and regression tests have been written and statically reviewed. Public testnet REST/RPC responses and authoritative QoreX API documentation were read successfully.
 
-**Dependency installation, `npm run build`, unit-test execution, browser rendering/QR scanning, and a real wallet transaction have NOT been verified in this session.** Shell calls were rejected **before execution** by the runtime's optional-permission argument serializer (it adds a `sandbox_permissions` request despite the session already having full file access). There are no shell exit codes or successful build results to report. `qrcode.react` and `vitest` are declared but are not yet installed, and the starter lockfile has not been regenerated. Run the setup and checks below after shell execution is restored; use `npm install`, not `npm ci`, until the updated lockfile is generated. Do not describe this as a completed zero-error build.
+**Unit tests, TypeScript/Vite production build, browser/QR checks, and a real wallet transaction have NOT been executed successfully in this resume.** The actual `npm test` and `npm run build` attempts with `/workspace/chit/chit` as working directory were rejected during command-tool argument validation, **before shell launch**: unwanted optional permission arguments produced `invalid justification: expected a non-empty sentence` or a same-mode escalation validation error. No test/compiler exit code exists; no zero-error build is claimed. The current runtime allows file edits, but its command-call argument contract remains a blocker.
+
+Read-only package inspection does confirm installed manifests for `qrcode.react` **4.2.0**, Vitest **2.1.9**, TypeScript **5.9.3**, and Vite **5.4.21**, and a lockfile with the current dependency declarations. The earlier assertion that QR/tests were merely declared but uninstalled is obsolete. Installation was not performed in this resume; existing `chit/dist/` files are **not** evidence of a fresh build of the upgraded source. Run the checks below once the command-tool invocation is corrected.
 
 ## Setup and start
 
@@ -69,7 +79,9 @@ The complete receipt-field allowlist is:
 | `facilityTag` | Short, generic clinic code such as `CLINIC-A`; never a person or phone number |
 | `note` | Optional predefined non-identifying visit note; an empty string if omitted |
 
-**Never enter, import, store, or publish patient names, diagnoses, medical images, phone numbers, or identifying notes.** There are no patient-name, diagnosis, phone, camera, or image-upload fields. `Custom` is a generic category, not a free-text diagnosis box. Notes intentionally use a controlled vocabulary (`Visit completed`, `Follow-up visit`, `Receipt reissued`, `Digital copy requested`, or empty) instead of unrestricted text. Imports reject extra fields, unsupported categories, and arbitrary notes rather than silently preserving them. Codes and tags must not be repurposed as patient identifiers; a schema cannot determine the operator's intent.
+**Never enter, import, store, or publish patient names, diagnoses, medical images, phone numbers, or identifying notes in a receipt.** There are no patient-name, diagnosis, phone, camera, or scan-upload receipt fields. `Custom` is a generic category, not a free-text diagnosis box. Notes intentionally use a controlled vocabulary: the five original empty/visit-note values remain valid; generic `PA View · Standard`, `AP / Lateral View`, `Follow-Up Clearance`, and `Baseline Screening` options were added without altering old hashes. Imports reject extra fields, unsupported categories, and arbitrary notes rather than silently preserving them.
+
+Receipt/facility-code validation checks **format**, not human meaning. A valid-shaped alphanumeric name or identifier could still be deliberately encoded in a code/tag. Operators must use generic clinic tags and random receipt serials, never identities. “Zero PII” is the required usage boundary, not an automatic semantic detector or an anonymization guarantee. The separate optional local file picker only fingerprints bytes in memory; it never uploads, previews, names, saves, or adds a file to a receipt.
 
 The app has no analytics, receipt API uploads, remote font/image dependencies, seed/private-key inputs, or secret-key storage. Imported files are read only in browser memory. Only allowlisted receipts are persisted, and imported records are saved only through **Save verified Chit**.
 
@@ -77,7 +89,7 @@ The app has no analytics, receipt API uploads, remote font/image dependencies, s
 
 ## Canonical SHA-256
 
-`chit/src/lib/receipt.ts` is the single canonicalization implementation for Issue, Verify, imports, and storage:
+`chit/src/lib/receiptSchema.ts` centralizes the unchanged v1 field normalization, re-exported through `receipt.ts`; `receipt.ts` serializes/hashes the same canonical bytes for Issue, Verify, imports, and storage:
 
 1. Reject unknown receipt fields and non-string values.
 2. Normalize text to **Unicode NFC**, trim, and collapse whitespace.
@@ -97,13 +109,15 @@ Only the five normalized fields are hashed. `version`, `chainId`, `receiptHash`,
 CHIT:v1:<64-lowercase-hex-receiptHash>
 ```
 
-The QR text is the compact JSON envelope; exported/copyable JSON is the same schema, optionally pretty-printed:
+The issued QR text is a **self-contained verification URL**, not a remote lookup ID. Its `#verify=<base64url>` fragment encodes the UTF-8 tuple `[1, receiptCode, scanCategory, visitDate, facilityTag, note, txHash]`. Copy Verification Link uses the same normalized fields and real hash; initial load and `hashchange` decode locally, switch to Verify, and read chain evidence. No claimed `receiptHash` or issuer authorization is carried as trusted proof. URL fragments are not sent in HTTP requests; links/history/clipboard remain plaintext. The app origin/path is retained, while arbitrary queries and previous fragments are removed.
+
+Exported/copyable JSON retains the legacy envelope, optionally pretty-printed:
 
 ```text
 { version: 1, chainId: "qorechain-diana", receipt: { five fields }, receiptHash: "<real hash>", txHash: "<real transaction hash>" }
 ```
 
-The metavariables above are explanatory only, **not a valid or issued demo receipt**. No example hash, synthetic transaction, or fake “VERIFIED” result is seeded into the UI or storage.
+The metavariables above are explanatory only, **not a valid or issued receipt**. The separately labeled public Diana sample uses the five non-identifying receipt fields supplied by the user, with its specific public transaction hash. It recomputes actual SHA-256 and fetches live chain evidence. No fabricated transaction, signature, substituted computed digest, or fake “VERIFIED” state is seeded into the UI or storage.
 
 ## Issue Chit: real QoreX flow
 
@@ -128,13 +142,13 @@ QoreX can automatically register a PQC key on an account's first send and expose
 - Same-page double clicks/in-flight attempts are locked. Confirmed or uncertain outcomes are not retried blindly. A known hash is shown/exportable even if storage quota or REST indexing fails.
 - localStorage read/check/write is not an atomic cross-tab lock. Do not issue the same code concurrently in multiple tabs. The same-page guard and persistent recovery protections are not a promise of cross-tab synchronization.
 - After a reload, unresolved drafts remain discoverable by code; recover the real hash in QoreX history or Explorer (Testnet), paste it in Verify, and save only after verification.
-- Corrupt storage is not silently overwritten. Duplicate codes cannot replace a different receipt. Storage is limited to 250 receipts/drafts per store with no automatic eviction.
+- Corrupt storage is not silently overwritten. Duplicate codes cannot replace a different receipt. Saving/automatic draft clearing checks the pending draft's **normalized five fields and receiptHash**, not only its short code, so an unrelated same-code import cannot erase it. All automatic callers supply the expected record; this guard is not an atomic cross-tab lock. Storage is limited to 250 receipts/drafts per store with no automatic eviction.
 - Deleting a downloaded QR image does not delete the local receipt. Use its short code in Verify or the recovery list. Clearing browser data **does** remove local recovery; export JSON as a separate backup.
-- A receipt code is a **local lookup key**, not a public chain registry. Another browser/device needs the exported JSON or scanned QR text plus transaction hash.
+- A receipt code is a **local lookup key**, not a public chain registry. Another browser/device needs the exported JSON or self-contained QR verification URL; that URL already includes all five fields and the transaction hash.
 
 ## Verify Chit and simulate tampering
 
-Use a saved code, paste the Chit envelope/QR text, or load a small `.json` / QR-payload `.txt` file. Flat receipt JSON plus a separately supplied `txHash` is also supported. Unknown fields, conflicting hashes, wrong chain/schema, malformed hashes, and arbitrary notes are rejected. Images are not accepted. Importing does not save the input.
+Use a saved code, paste a Chit JSON envelope or self-contained verification URL/fragment, or load a small `.json` / link `.txt` file (up to 12 KB). Flat receipt JSON plus a separately supplied `txHash` is also supported. Unknown fields, conflicting hashes, wrong chain/schema, malformed hashes, and arbitrary notes are rejected. Images/PDFs are not receipt imports; the independent fingerprint utility is strictly local and does not verify or save a receipt. Importing does not save the input.
 
 The verifier reads the required public REST path:
 
@@ -153,7 +167,37 @@ It also checks `/cosmos/base/tendermint/v1beta1/node_info` identifies Diana. In 
 5. Actual **`pqc_hybrid_verify.status=verified`** with exactly one supported algorithm attribute; missing/duplicate attributes, unsupported success-looking aliases, and contradictory direct/log events fail closed. A mere `pqc_verify` / `algorithm_active` event is insufficient.
 6. **Anchored Hash** from the exact `CHIT:v1:...` transaction memo equals **Computed Hash** from the editable receipt. The JSON's claimed `receiptHash` is never substituted as chain evidence.
 
-Side-by-side hashes, signature lengths/type URL, event status, code/height, and an Explorer link are shown. Edit `scanCategory` / `visitDate` or click **Simulate Tamper**: a mismatch becomes **TAMPERED (HASH MISMATCH)**. **Reset** restores the original in-memory receipt; neither helper broadcasts or modifies saved records. Old “VERIFIED” results are not reused while an edited hash is computing. Missing evidence, failed requests, wrong chains, unsupported extensions, or failed transactions do not produce success.
+The Cryptographic Evidence & Hash Diff panel displays actual side-by-side digests, per-position differences, block height, on-chain signer, transaction code, signature byte lengths/type, hybrid event, and an Explorer reference. Its source/trust inspector records the **actual requested REST/proxy URL**, not a hard-coded public URL when a different node/proxy is configured. Edit any valid receipt parameter or click **Simulate Tamper**: a mismatch becomes **HASH MISMATCH — TAMPER DETECTED**. **Reset** restores the original in-memory fields; neither helper broadcasts or modifies saved originals. Old VERIFIED results are suppressed while a new hash is computing. Missing evidence, API errors, wrong networks, unsupported signatures/events, or failed delivery never produce success. Local archive/quota/collision warnings are separate from—and do not negate—unchanged cryptographic evidence.
+
+### Optional client-side issuer allowlist
+
+Verify offers local permissioned mode under `chit.issuers.v1`. It checks the **unique, checksum-valid `MsgSend.from_address`** against this browser's list, never a pasted issuer, fee payer, recipient, or facility tag. Inspect/add/remove only lowercase 20-byte `qor1…` public addresses (up to 100); no clinic-name or patient labels are stored. Defaults include the observed sample signer and two explicitly synthetic demo addresses. These are **not vetted clinics** or credentials. Enabling the list expresses the operator's trust choice; it is not an external registry, on-chain issuance restriction, licensure check, or legal authorization. Missing/unlisted senders and malformed/unreadable policy fail closed rather than silently bypassing permissioning.
+
+### Live Diana sample — supplied receipt and real comparison
+
+**Load Live Testnet Sample** populates the user-supplied five fields and queries this [real public transaction](https://api-testnet.qore.host/cosmos/tx/v1beta1/txs/79C0518AB0FB481C992B21559A27FE169B6877CC8CD37E862C8BE4FDF615D3AD) via the same `/lcd` verification path:
+
+```text
+txHash: 79C0518AB0FB481C992B21559A27FE169B6877CC8CD37E862C8BE4FDF615D3AD
+memo: CHIT:v1:7e146384b7b5b73bfec366bb7f905c34bb9efd0d4c467c723cd0aa3e2773c727
+issuer: qor1dtzxvc7q7glkyj9n3vx2jewpm7hqcf9u0d7h2c
+```
+
+Supplied values: `CHT-4671`, `Chest X-Ray`, `11/25/2026`, `CLINIC-A`, `Follow-up visit`. The display date is represented as `2026-11-25` for the unchanged v1 ISO date schema; the controlled note already exists. The canonical JSON is exactly:
+
+```json
+{"facilityTag":"CLINIC-A","note":"Follow-up visit","receiptCode":"CHT-4671","scanCategory":"Chest X-Ray","visitDate":"2026-11-25"}
+```
+
+Read-only LCD inspection again reported code `0`, height `10725694`, a critical hybrid extension with algorithm `1`, and `pqc_hybrid_verify.status=verified` / `algorithm_id=dilithium5`. This is node-reported anchor evidence, **not** a local receipt hash-match result or an independently verified signature/inclusion proof.
+
+`sample.ts` creates a strictly normalized fresh copy and computes actual WebCrypto SHA-256 without reading localStorage. Verify fetches the real transaction and node identity; the existing hybrid/inclusion/hash/issuer gates determine the verdict. The tamper editor activates for the supplied fields, even on a mismatch. Both digest columns are actual values; the expected reference never replaces either. Reset restores the supplied fields, not a forced success state.
+
+All five requested fields are available, but the numerical digest/reference check and real app VERIFIED → TAMPERED → Reset remain **unexecuted** in this runtime. The sample regression compares an independent Node SHA-256 of the exact canonical preimage with the published reference. If it fails, retain HASH MISMATCH and obtain corrected original data—never change v1 ordering, date validation, or cryptographic gates to force equality.
+
+### Optional local scan-file fingerprint — zero upload
+
+**Check Local File SHA-256** accepts PDF/PNG/JPEG up to 32 MiB. Extension, supplied MIME type, and detected magic bytes must agree. Browser WebCrypto hashes the exact file bytes in memory; only format, size, and digest are shown. No filename, preview, file bytes, or fingerprint is saved, uploaded, added to a receipt, or placed on-chain. Clear/close discards the displayed fingerprint. Copying copies only the digest. This utility does not authenticate the file, establish a scan occurred, or link it to the receipt anchor. Use benign fixtures for testing and inspect browser network/storage behavior before claiming the manual zero-upload check passed.
 
 ### What the anchor proves — and does not
 
@@ -195,7 +239,7 @@ No receipt JSON is POSTed to that proxy; it forwards read-only evidence requests
 
 ## Tests, manual verification, and sources
 
-Regression tests in `chit/tests/` cover canonicalization, WebCrypto hashing, field edits/reset, strict imports, storage failures/corruption/collisions/pending drafts, typed/protobuf hybrid extensions, signature shape/lengths, contradictory/missing events, network/tx failures, and mocked read-only fetches. **Synthetic signature bytes are classifier fixtures, not cryptographically valid signatures or real receipts.** Tests are currently written but unexecuted.
+Regression tests in `chit/tests/` cover unchanged v1 canonical bytes/notes and WebCrypto SHA-256, field edits/reset, strict imports, local archive/pending/collision guards, compact fragment sharing, issuer policies, typed/protobuf hybrid evidence, signature shape/lengths, missing/conflicting events, mocked chain/network requests with actual source attribution, local file fingerprints, digest byte/hex diffs, and the supplied sample's exact canonical/reference comparison, storage-independent preparation, fresh editor copies, normal LCD path, and tamper/reset. **Synthetic signature bytes are classifier fixtures, not cryptographically valid signatures or live evidence.** The test script is configured but did not execute: command-tool validation prevented shell launch. In particular, the new reference-equality assertion is not a passing check until executed. Native QoreX and React interaction/race/storage coverage plus real mobile/QR/issuance validation remain pending. Cross-tab storage reservations/writes are not atomic; use one issuance tab.
 
 The complete manual end-to-end checklist and honest AI/runtime verification record are in **[AI_USAGE.md](AI_USAGE.md)**.
 
@@ -210,4 +254,15 @@ Authoritative API sources used instead of guessed wallet methods:
 
 ## License
 
-**MIT** for Chit application code: see **[LICENSE](LICENSE)**. Third-party packages retain their respective licenses; the QoreChain SDK is Apache-2.0.
+**MIT** for Chit application code, copyright Chit contributors: see **[LICENSE](LICENSE)**. Preserve its copyright/license attribution in copies and distributions. Dependencies retain their own licenses and credits:
+
+| Open-source component | Credit / license | Use |
+| --- | --- | --- |
+| [@qorechain/sdk](https://github.com/qorechain/qorechain-sdk) | QoreChain / Apache-2.0 | Real message composers, codecs, REST/address utilities |
+| [React / React DOM](https://github.com/facebook/react) | React contributors / MIT | Client-side workspace UI |
+| [Vite](https://github.com/vitejs/vite) | Vite contributors / MIT | Development, static bundling, local LCD proxy |
+| [qrcode.react](https://github.com/zpao/qrcode.react) | Paul O’Shannessy and contributors / ISC | Local scannable QR generation |
+| [TypeScript](https://github.com/microsoft/TypeScript) | Microsoft/contributors / Apache-2.0 | Type checking |
+| [Vitest](https://github.com/vitest-dev/vitest) | Vitest contributors / MIT | Regression tests |
+
+The NIST FIPS 204 badge identifies an algorithm specification, **not** FIPS-validated software, independent signature verification, or clinical certification.

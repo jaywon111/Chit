@@ -529,6 +529,45 @@ describe("pending recovery drafts (not verification proof)", () => {
     expect(() => ensureReceiptStorage("CHT-4822", storage)).not.toThrow();
   });
 
+  it.each(["receipt", "receiptHash"] as const)("preserves an unrelated unresolved draft when an imported receipt collides on %s", (field) => {
+    const storage = new MemoryStorage();
+    const draft = savePendingReceipt(RECEIPT, HASH, storage);
+    const raw = storage.getItem(PENDING_STORAGE_KEY);
+    const unrelated = createReceiptRecord(
+      field === "receipt" ? { ...RECEIPT, note: "Visit completed" } : RECEIPT,
+      field === "receiptHash" ? OTHER_HASH : HASH,
+      OTHER_TX_HASH,
+    );
+    storage.setItem.mockClear();
+    expect(() => saveReceipt(unrelated, storage)).toThrow(/different unresolved Chit.*not changed/i);
+    expect(() => clearPendingReceipt(RECEIPT.receiptCode, storage, unrelated)).toThrow(/not cleared/i);
+    expect(loadPendingReceipts(storage)).toEqual([draft]);
+    expect(storage.getItem(PENDING_STORAGE_KEY)).toBe(raw);
+    expect(loadReceipts(storage)).toEqual([]);
+    expect(storage.setItem).not.toHaveBeenCalled();
+  });
+
+  it("clears only a matching normalized expected receipt/hash during automatic recovery", () => {
+    const storage = new MemoryStorage();
+    savePendingReceipt(RECEIPT, HASH, storage);
+    const other = savePendingReceipt({ ...RECEIPT, receiptCode: "CHT-4822" }, OTHER_HASH, storage);
+    const expected = { receipt: { ...RECEIPT, facilityTag: " clinic-a ", note: "   " }, receiptHash: HASH.toUpperCase() };
+    saveReceipt(record(), storage);
+    expect(clearPendingReceipt(RECEIPT.receiptCode, storage, expected)).toEqual([other]);
+    expect(loadReceipts(storage)).toEqual([record()]);
+    expect(loadPendingReceipts(storage)).toEqual([other]);
+  });
+
+  it("rejects an expected receipt for a different target code before clearing any draft", () => {
+    const storage = new MemoryStorage();
+    const draft = savePendingReceipt(RECEIPT, HASH, storage);
+    const raw = storage.getItem(PENDING_STORAGE_KEY);
+    storage.setItem.mockClear();
+    expect(() => clearPendingReceipt("CHT-4822", storage, draft)).toThrow(/not cleared/i);
+    expect(storage.getItem(PENDING_STORAGE_KEY)).toBe(raw);
+    expect(storage.setItem).not.toHaveBeenCalled();
+  });
+
   it("does not create a draft with a code already committed locally", () => {
     const storage = new MemoryStorage({ [STORAGE_KEY]: JSON.stringify([record()]) });
     expect(() => savePendingReceipt(RECEIPT, HASH, storage)).toThrow(/already saved/i);

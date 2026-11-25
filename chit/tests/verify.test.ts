@@ -190,6 +190,13 @@ describe("synthetic LCD classifier: supported hybrid evidence", () => {
     },
   );
 
+  it("records a caller-supplied read source without trusting a source pasted into the LCD response", () => {
+    const source = `/lcd${TX_PATH}`;
+    const evidence = inspectTransaction({ ...syntheticLCD(), sourceUrl: "https://untrusted.invalid/not-queried" }, TEST_TX_HASH, CHAIN_ID, source);
+    expect(evidence.sourceUrl).toBe(source);
+    expect(evidence.hybridVerified).toBe(true);
+  });
+
   it("gets identical shape evidence from expanded JSON and SDK-encoded raw protobuf Any", () => {
     const typed = inspectTransaction(syntheticLCD(TEST_HASH, "expanded-snake"), TEST_TX_HASH);
     const raw = inspectTransaction(syntheticLCD(TEST_HASH, "any-base64"), TEST_TX_HASH);
@@ -714,6 +721,7 @@ describe("REST fetch guards (global fetch mocks only; no network)", () => {
   it("fetches the requested tx plus node info and accepts only the expected chain", async () => {
     const fetchMock = mockLCD();
     const evidence = await fetchChainEvidence(`0x${TEST_TX_HASH.toLowerCase()}`);
+    expect(evidence.sourceUrl).toBe(`${REST_BASE}${TX_PATH}`);
     expect(verificationVerdict(evidence, TEST_HASH).kind).toBe("verified");
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([

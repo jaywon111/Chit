@@ -60,7 +60,7 @@ export function IssueView({ wallet, connect, knownCodes, pendingReceipts, onRefr
     setIssued(record); setPhase("submitted"); setError(notice ?? null);
     try {
       saveReceipt(record); setSaved(true);
-      clearPendingReceipt(record.receipt.receiptCode);
+      clearPendingReceipt(record.receipt.receiptCode, undefined, record);
     } catch (err) { setStorageNotice(err instanceof Error ? err.message : "Download this receipt JSON immediately to preserve the proof."); }
     onRefresh();
   }
@@ -96,7 +96,7 @@ export function IssueView({ wallet, connect, knownCodes, pendingReceipts, onRefr
       } else {
         const message = err instanceof Error ? err.message : "QoreX could not issue this receipt.";
         if (recovery) {
-          try { clearPendingReceipt(recovery.receipt.receiptCode); } catch {
+          try { clearPendingReceipt(recovery.receipt.receiptCode, undefined, recovery); } catch {
             setUnresolved(recovery); setPhase("unknown"); setError(`${message} The recovery draft could not be cleared. Resolve it before reissuing.`); onRefresh(); return;
           }
         }

@@ -29,10 +29,13 @@ export function VerifyView({ records, seed, onSave }: { records: ReceiptRecord[]
   const [fields, setFields] = useState<ReceiptFields | null>(null);
   const [evidence, setEvidence] = useState<ChainEvidence | null>(null);
   const [activeTx, setActiveTx] = useState<string | null>(null);
-  const [sampleOnly, setSampleOnly] = useState(false);
+  const [sampleLoaded, setSampleLoaded] = useState(false);
   const [issuerState, setIssuerState] = useState<IssuerPolicyState>(readIssuerPolicyState);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Persistence is separate from cryptographic verification. A quota/collision
+  // warning must not relabel valid, unchanged chain/hash evidence as failed.
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const controller = useRef<AbortController | null>(null);
   const sequence = useRef(0);
@@ -42,7 +45,7 @@ export function VerifyView({ records, seed, onSave }: { records: ReceiptRecord[]
   function clearResult(): void {
     sequence.current += 1; copySequence.current += 1; controller.current?.abort();
     setEvidence(null); setOriginal(null); setFields(null); setActiveTx(null);
-    setSampleOnly(false); setBusy(false); setError(null); setNotice("");
+    setSampleLoaded(false); setBusy(false); setError(null); setSaveError(null); setNotice("");
   }
 
   async function readProof(txHash: string): Promise<void> {
@@ -50,7 +53,7 @@ export function VerifyView({ records, seed, onSave }: { records: ReceiptRecord[]
     const active = new AbortController();
     controller.current = active;
     const request = ++sequence.current;
-    setBusy(true); setActiveTx(txHash); setEvidence(null); setError(null); setNotice("");
+    setBusy(true); setActiveTx(txHash); setEvidence(null); setError(null); setSaveError(null); setNotice("");
     try {
       const proof = await fetchChainEvidence(txHash, active.signal);
       if (request === sequence.current && !active.signal.aborted) setEvidence(proof);
@@ -65,7 +68,7 @@ export function VerifyView({ records, seed, onSave }: { records: ReceiptRecord[]
       ...(input.receiptHash !== undefined ? { receiptHash: normalizeHash(input.receiptHash) } : {}),
     };
     setOriginal({ ...clean, receipt: { ...clean.receipt } });
-    setFields({ ...clean.receipt }); setSampleOnly(false);
+    setFields({ ...clean.receipt }); setSampleLoaded(false);
     setJsonText(importJSON(clean)); setTxInput(""); setCode(clean.receipt.receiptCode);
     void readProof(clean.txHash);
   }
@@ -139,21 +142,29 @@ export function VerifyView({ records, seed, onSave }: { records: ReceiptRecord[]
   }
 
   async function loadSample(): Promise<void> {
+    if (busy) return;
     clearResult(); setMode("json"); setJsonText(""); setTxInput(SAMPLE_TX_HASH); setBusy(true);
     const request = sequence.current;
-    let input: ImportedReceipt | null = null;
-    try { input = await resolveTestnetSample(loadReceipts()); } catch { /* Storage is not needed to inspect public chain evidence. */ }
-    if (request !== sequence.current) return;
-    if (input) { loadInput(input); return; }
-    // The original is not on-chain. Never invent fields, substitute the memo as a
-    // local digest, or manufacture VERIFIED just to make this demo look clean.
-    setSampleOnly(true);
-    void readProof(SAMPLE_TX_HASH);
-    setNotice("Real Diana example loaded. No matching original receipt was found locally. Chain evidence is live; import its exported receipt JSON to establish hash equality and activate the tamper simulator.");
+    try {
+      // Supplied fields pass the same strict normalization and WebCrypto hashing
+      // as every receipt. No local archive, seeded evidence, or trusted memo hash.
+      const input = await resolveTestnetSample();
+      if (request !== sequence.current) return;
+      loadInput(input);
+      setSampleLoaded(true);
+      setNotice(input.receiptHash === SAMPLE_EXPECTED_HASH
+        ? "CHT-4671 loaded with the supplied five non-identifying fields (visit date 2026-11-25). Its canonical SHA-256 matches the sample reference; verification still requires the live Diana transaction and accepted hybrid evidence. Edit a field to test tampering."
+        : "CHT-4671 loaded with the supplied fields (visit date 2026-11-25). Their actual canonical SHA-256 differs from the sample reference. Live chain verification and the tamper editor remain active; no matching hash or VERIFIED result is assumed.");
+    } catch (err) {
+      if (request !== sequence.current) return;
+      setBusy(false);
+      setError(err instanceof Error ? err.message : "The supplied sample receipt could not be normalized and hashed. No verification is assumed.");
+    }
   }
 
   function tamper(): void {
     if (!fields || !original) return;
+    copySequence.current += 1; setSaveError(null);
     const index = SCAN_CATEGORIES.indexOf(original.receipt.scanCategory as typeof SCAN_CATEGORIES[number]);
     setFields({ ...fields, scanCategory: SCAN_CATEGORIES[(index + 1) % SCAN_CATEGORIES.length] });
     setNotice("Local category changed. Saved originals and the on-chain transaction are unchanged. No transaction was sent.");
@@ -161,6 +172,7 @@ export function VerifyView({ records, seed, onSave }: { records: ReceiptRecord[]
 
   function reset(): void {
     if (!original) return;
+    copySequence.current += 1; setSaveError(null);
     setFields({ ...original.receipt });
     setNotice("Original receipt parameters restored locally. The blockchain did not change.");
   }
@@ -176,12 +188,8 @@ export function VerifyView({ records, seed, onSave }: { records: ReceiptRecord[]
   if (busy) verdict = { kind: "pending", title: "READING LIVE CHAIN EVIDENCE", detail: "Checking the Diana node, successful inclusion, and both signature layers. No wallet or broadcast." };
   else if (error) verdict = { kind: "failed", title: "VERIFICATION NOT ESTABLISHED", detail: error };
   else if (fields && hash.error) verdict = { kind: "incomplete", title: "INVALID RECEIPT PARAMETERS", detail: hash.error };
-  else if (sampleOnly && evidence?.success && evidence.anchoredHash) {
-    verdict = evidence.anchoredHash !== SAMPLE_EXPECTED_HASH
-      ? { kind: "failed", title: "SAMPLE ANCHOR DOES NOT MATCH", detail: "The live transaction memo differs from the supplied sample reference. No sample verification is assumed." }
-      : !evidence.hybridVerified
-        ? { kind: "incomplete", title: "HYBRID PROOF INCOMPLETE", detail: "The sample has an anchor, but the live supported extension, classical signature, and hybrid event are all required." }
-        : { kind: "incomplete", title: "ORIGINAL RECEIPT REQUIRED", detail: "The live sample has a successful hybrid-signed anchor. Its five original fields are not stored on-chain and were not supplied. A memo hash alone cannot verify a receipt." };
+  else if (sampleLoaded && evidence?.success && evidence.anchoredHash && evidence.anchoredHash !== SAMPLE_EXPECTED_HASH) {
+    verdict = { kind: "failed", title: "SAMPLE ANCHOR DOES NOT MATCH", detail: "The live transaction memo differs from the supplied sample reference. Both actual digests are shown; no sample verification is assumed." };
   }
   if (issuerState.error && (verdict.kind === "verified" || verdict.kind === "unauthorized")) {
     verdict = { kind: "incomplete", title: "ISSUER POLICY UNAVAILABLE", detail: "The local issuer policy could not be safely read or saved. Existing evidence is shown, but permissioned verification fails closed until you explicitly recover the policy." };
@@ -191,8 +199,9 @@ export function VerifyView({ records, seed, onSave }: { records: ReceiptRecord[]
 
   function saveVerified(): void {
     if (!fields || !evidence?.anchoredHash || verdict.kind !== "verified" || issuerState.error) return;
+    setSaveError(null);
     try { onSave(createReceiptRecord(fields, evidence.anchoredHash, evidence.txHash)); setNotice("Verified receipt saved on this browser. Recover it by its receipt code or export JSON."); }
-    catch (err) { setError(err instanceof Error ? err.message : "Could not save the verified receipt. Existing records were not overwritten."); }
+    catch (err) { setSaveError(err instanceof Error ? err.message : "Could not save the verified receipt. Existing records were not overwritten."); }
   }
 
   return <section className="page verify-page" aria-labelledby="verify-heading">
@@ -203,17 +212,18 @@ export function VerifyView({ records, seed, onSave }: { records: ReceiptRecord[]
         <div className="field"><label htmlFor="verify-json">Receipt JSON or verification link <span className="field-tag">NON-IDENTIFYING ONLY</span></label><textarea id="verify-json" value={jsonText} onChange={(event) => { clearResult(); setJsonText(event.target.value); }} placeholder="Paste receipt JSON, a scanned verification URL, or #verify=…" rows={4} maxLength={12_000} autoComplete="off" spellCheck={false} required disabled={busy} /><small>Only the five controlled fields and proof metadata. Extra fields, names, diagnoses, patient identifiers and free-text notes are rejected. Import does not save the receipt.</small></div>
         <div className="json-import-bottom"><div className="field"><label htmlFor="verify-tx">Transaction hash <span className="field-tag">IF ABSENT FROM JSON</span></label><input id="verify-tx" value={txInput} onChange={(event) => { clearResult(); setTxInput(event.target.value); }} placeholder="64 hexadecimal characters" maxLength={66} autoComplete="off" spellCheck={false} disabled={busy} className="mono-input" /></div><div className="import-actions"><label className={`button secondary file-button ${busy ? "disabled" : ""}`}><Icon name="upload" size={16} /> Load text file<input type="file" accept=".json,.txt,application/json,text/plain" onChange={(event) => { void importFile(event); }} disabled={busy} aria-label="Load receipt JSON or verification-link text file locally" /></label><button className="button primary" type="submit" disabled={busy}>{busy ? <span className="spinner" /> : <Icon name="shield" size={17} />}{busy ? "Reading…" : "Verify Chit"}<Icon name="arrow" size={16} /></button></div></div>
       </div>}
-      <div className="sample-toolbar"><button className="button sample-button" type="button" disabled={busy} onClick={() => { void loadSample(); }}><Icon name="globe" size={16} /> Load Live Testnet Sample <Icon name="arrow" size={15} /></button><span>REAL DIANA TRANSACTION / MATCHING ORIGINAL REQUIRED</span></div>
-      {sampleOnly && <div className="sample-reference"><span>SUPPLIED SAMPLE COMMITMENT / NOT A COMPUTED RECEIPT HASH</span><code>{SAMPLE_EXPECTED_HASH}</code><p>The hash is not reversible. If the matching original is not in this browser, import its exported receipt JSON. No clean receipt verification is fabricated.</p></div>}
+      <div className="sample-toolbar"><button className="button sample-button" type="button" disabled={busy} onClick={() => { void loadSample(); }}><Icon name="globe" size={16} /><span>Load Live Testnet Sample</span><Icon name="arrow" size={15} /></button><span>CHT-4671 / SUPPLIED RECEIPT / LIVE DIANA READ</span></div>
+      {sampleLoaded && <div className="sample-reference"><span>EXPECTED SAMPLE ANCHOR / REFERENCE ONLY</span><code>{SAMPLE_EXPECTED_HASH}</code><p>The evidence panel compares the memo fetched from Diana with SHA-256 recomputed from the editable receipt. This reference never replaces either actual digest. Reset restores the supplied five fields, not a forced VERIFIED state.</p></div>}
       {error && <div className="alert error-alert" role="alert"><Icon name="alert" size={19} /><span>{error}</span></div>}
       {notice && <p className="inline-notice" role="status">{notice}</p>}
     </form>
     <IssuerPolicyPanel state={issuerState} onChange={setIssuerState} signerAddress={evidence?.signerAddress ?? null} />
+    {saveError && <div className="alert warning-alert" role="alert"><Icon name="download" size={18} /><span><strong>Local recovery needs attention.</strong> {saveError} This storage warning does not change the on-chain evidence or hash comparison. Keep the original receipt JSON.</span></div>}
     <div className={`verdict-banner verdict-${verdict.kind}`} role="status" aria-live="polite"><div className="verdict-icon">{busy ? <span className="spinner" /> : <Icon name={verdict.kind === "verified" ? "shield" : ["tampered", "failed", "unauthorized"].includes(verdict.kind) ? "alert" : "hash"} size={24} />}</div><div><span className="section-number">RECEIPT INTEGRITY / {issuerState.policy.enabled ? "LOCAL PERMISSIONED MODE" : "UNPERMISSIONED MODE"}</span><h2>{verdict.title}</h2><p>{verdict.detail}</p></div>{verdict.kind === "verified" && <span className="proof-seal"><Icon name="check" size={17} /> HYBRID / HASH MATCH</span>}</div>
     <div className="verify-grid">
       <section className="panel edit-panel" aria-labelledby="tamper-heading"><div className="panel-heading"><div><div className="section-number">LOCAL RECEIPT / MUTABLE COPY</div><h2 id="tamper-heading">Tamper simulator</h2><p>Edit a valid parameter. SHA-256 recomputes immediately.</p></div><span className={`revision-tag ${changedCount ? "revision-edited" : ""}`}>{fields ? `${changedCount} EDIT${changedCount === 1 ? "" : "S"}` : "INACTIVE"}</span></div>
         <div className="tamper-tools"><button type="button" className="button tamper-button" disabled={!original} onClick={tamper}><Icon name="alert" size={16} /> Simulate Tamper</button><button type="button" className="button secondary" disabled={!original} onClick={reset}><Icon name="refresh" size={15} /> Reset</button></div>
-        {fields && original ? <><ReceiptFieldsForm value={fields} onChange={setFields} editing original={original.receipt} idPrefix="verify-edit" /><p className="local-only-note"><Icon name="lock" size={15} /> Edits stay in memory. Saved originals, issuer policy, and the chain are never modified by this simulator.</p><details className="canonical-inspector"><summary>Inspect canonical JSON<Icon name="chevron" size={15} /></summary><div><span>ORIGINAL IMPORTED PARAMETERS</span><pre>{canonicalReceiptJSON(original.receipt)}</pre><span>CURRENT LOCAL PARAMETERS</span><pre>{hash.canonical ?? "No valid normalized receipt parameters"}</pre></div></details><div className="verified-actions"><button type="button" className="button primary full-width" disabled={verdict.kind !== "verified"} onClick={saveVerified}><Icon name="download" size={16} /> Save verified receipt locally</button><button type="button" className="button secondary full-width" onClick={() => { try { void copyValue(createVerificationLink(original), "Original verification link"); } catch { setNotice("The original verification link could not be created. Export the original receipt JSON instead."); } }}><Icon name="copy" size={16} /> Copy original verification link</button></div></> : <div className="editor-empty"><div className="editor-empty-symbol"><Icon name="receipt" size={30} /></div><h3>{sampleOnly ? "Original sample receipt required" : "Awaiting receipt parameters"}</h3><p>{sampleOnly ? "The transaction contains a hash, not its preimage. Supply the original five non-identifying fields to activate live comparison and tampering." : "Load a saved receipt, JSON, or self-contained QR link. The five editable fields appear here after strict schema validation."}</p><div className="empty-field-lines" aria-hidden="true"><span /><span /><span /><span /></div></div>}
+        {fields && original ? <><ReceiptFieldsForm value={fields} onChange={(next) => { copySequence.current += 1; setSaveError(null); setNotice(""); setFields(next); }} editing original={original.receipt} idPrefix="verify-edit" /><p className="local-only-note"><Icon name="lock" size={15} /> Edits stay in memory. Saved originals, issuer policy, and the chain are never modified by this simulator.</p><details className="canonical-inspector"><summary>Inspect canonical JSON<Icon name="chevron" size={15} /></summary><div><span>ORIGINAL IMPORTED PARAMETERS</span><pre>{canonicalReceiptJSON(original.receipt)}</pre><span>CURRENT LOCAL PARAMETERS</span><pre>{hash.canonical ?? "No valid normalized receipt parameters"}</pre></div></details><div className="verified-actions"><button type="button" className="button primary full-width" disabled={verdict.kind !== "verified"} onClick={saveVerified}><Icon name="download" size={16} /> Save verified receipt locally</button><button type="button" className="button secondary full-width" onClick={() => { try { void copyValue(createVerificationLink(original), "Original verification link"); } catch { setNotice("The original verification link could not be created. Export the original receipt JSON instead."); } }}><Icon name="copy" size={16} /> Copy original verification link</button></div></> : <div className="editor-empty"><div className="editor-empty-symbol"><Icon name="receipt" size={30} /></div><h3>Awaiting receipt parameters</h3><p>Load the supplied live sample, a saved receipt, JSON, or a self-contained QR link. The five editable fields appear here after strict schema validation.</p><div className="empty-field-lines" aria-hidden="true"><span /><span /><span /><span /></div></div>}
       </section>
       <CryptoEvidencePanel evidence={evidence} computedHash={hash.hash} activeTx={activeTx} busy={busy} verdict={verdict} receiptPresent={!!fields} suppliedHashDiffers={suppliedHashDiffers} onRetry={() => { if (activeTx) void readProof(activeTx); }} onCopy={(value, label) => { void copyValue(value, label); }} />
     </div>

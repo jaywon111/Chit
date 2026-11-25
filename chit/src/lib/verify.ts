@@ -123,7 +123,7 @@ function transactionSigner(body: JsonObject): string | null {
 }
 
 /** Never uses a supplied receiptHash/issuer as chain evidence. Only the on-chain transaction. */
-export function inspectTransaction(payload: unknown, requestedTxHash: string, network: string = CHAIN_ID): ChainEvidence {
+export function inspectTransaction(payload: unknown, requestedTxHash: string, network: string = CHAIN_ID, sourceUrl?: string): ChainEvidence {
   const root = object(payload);
   const response = object(root.tx_response);
   if (!Object.keys(response).length) throw new Error("The REST response does not contain a transaction result.");
@@ -162,7 +162,8 @@ export function inspectTransaction(payload: unknown, requestedTxHash: string, ne
     extension, classicalSignatureBytes, classicalSignatureValid,
     pqcEventStatus: event.status, pqcEventVerified: event.verified,
     hybridVerified: extension.validShape && classicalSignatureValid && event.verified,
-    sourceUrl: `${REST_URL}/cosmos/tx/v1beta1/txs/${txHash}`,
+    // Pure classification defaults to the public reference; live reads pass their actual URL.
+    sourceUrl: sourceUrl ?? `${REST_URL}/cosmos/tx/v1beta1/txs/${txHash}`,
   };
 }
 
@@ -214,17 +215,18 @@ export async function fetchChainEvidence(txHashInput: string, signal?: AbortSign
   signal?.addEventListener("abort", abort, { once: true });
   const timeout = globalThis.setTimeout(() => controller.abort(), 25_000);
   const base = REST_BASE.replace(/\/$/, "");
+  const txUrl = `${base}/cosmos/tx/v1beta1/txs/${txHash}`;
   try {
-    // /lcd forwards these exact paths to https://api-testnet.qore.host; direct
-    // deployment can set VITE_QORE_REST_URL to that public REST URL.
+    // The default /lcd proxy forwards these public chain paths. Preserve the
+    // actual requested URL, rather than attributing a configurable node to REST_URL.
     const [tx, node] = await Promise.all([
-      readJSON(`${base}/cosmos/tx/v1beta1/txs/${txHash}`, controller.signal),
+      readJSON(txUrl, controller.signal),
       readJSON(`${base}/cosmos/base/tendermint/v1beta1/node_info`, controller.signal),
     ]);
     const nodeInfo = object(object(node).default_node_info);
     const chainId = str(nodeInfo.network);
     if (chainId !== CHAIN_ID) throw new Error("The REST node is not qorechain-diana. Its response was rejected.");
-    return inspectTransaction(tx, txHash, chainId);
+    return inspectTransaction(tx, txHash, chainId, txUrl);
   } catch (error) {
     if (controller.signal.aborted && !signal?.aborted) throw new Error("The testnet verification request timed out. Retry this transaction hash; do not rebroadcast.");
     throw error;

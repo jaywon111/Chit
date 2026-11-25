@@ -36,7 +36,7 @@ export function ReceiptFieldsForm({ value, onChange, disabled = false, editing =
       <div className={fieldClass("facilityTag")}>
         <label htmlFor={`${idPrefix}-facility`}>Facility tag {editTag("facilityTag")}</label>
         <input id={`${idPrefix}-facility`} name="facilityTag" placeholder="CLINIC-A" value={value.facilityTag} onChange={(event) => update("facilityTag", event.target.value.toUpperCase())} required maxLength={16} autoComplete="off" spellCheck={false} aria-describedby={`${idPrefix}-facility-help`} className="mono-input" />
-        <small id={`${idPrefix}-facility-help`}>Generic clinic code only.</small>
+        <small id={`${idPrefix}-facility-help`}>Generic clinic code only. Never encode a name, patient ID, or phone number.</small>
       </div>
     </div>
     <div className={fieldClass("note")}>

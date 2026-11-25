@@ -11,7 +11,7 @@ export const EXPLORER_URL = "https://explore.qore.network";
 // Set VITE_QORE_REST_URL=/lcd to use the app's same-origin LCD proxy, or set a
 // direct REST base. There is deliberately no localhost or mainnet default.
 export const REST_BASE = (
-  import.meta.env.VITE_QORE_REST_URL?.trim() || REST_URL
+  import.meta.env.VITE_QORE_REST_URL?.trim() || "/lcd"
 ).replace(/\/+$/, "");
 
 /**

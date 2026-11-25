@@ -7,6 +7,7 @@ import { CHAIN_ID, EXPLORER_URL, explorerTxUrl } from "../lib/network.js";
 import { clearPendingReceipt, createReceiptRecord, ensureReceiptStorage, generateReceiptCode, hashReceipt, loadPendingReceipts, loadReceipts, newReceipt, normalizeReceipt, savePendingReceipt, saveReceipt, serializePendingReceipt, serializeReceipt, type PendingReceipt, type ReceiptFields, type ReceiptRecord } from "../lib/receipt.js";
 import { copyText, downloadQR, downloadText } from "../lib/export.js";
 import { useReceiptHash } from "../lib/useReceiptHash.js";
+import { createVerificationLink } from "../lib/share.js";
 
 function initialReceipt(codes: readonly string[]): ReceiptFields {
   try { return newReceipt(codes); } catch {
@@ -112,25 +113,33 @@ export function IssueView({ wallet, connect, knownCodes, pendingReceipts, onRefr
     } catch (err) { setCopyNotice(err instanceof Error ? err.message : "Could not copy JSON."); }
   }
 
+  async function copyVerificationLink(): Promise<void> {
+    if (!issued) return;
+    try { await copyText(createVerificationLink(issued)); setCopyNotice("Self-contained verification link copied. It contains only the five receipt fields and transaction hash."); }
+    catch (err) { setCopyNotice(err instanceof Error ? err.message : "Could not copy the verification link. Export JSON instead."); }
+  }
+
   const progressText = phase === "hashing" ? "Computing SHA-256…" : phase === "wallet" ? "Connecting QoreX…" : phase === "broadcasting" ? "Confirm the hybrid transaction in QoreX…" : "";
+  const ticketReceipt = issued?.receipt ?? unresolved?.receipt ?? draft;
+  const ticketHash = issued?.receiptHash ?? unresolved?.receiptHash ?? hash.hash;
+  let verificationLink: string | null = null;
+  let linkError: string | null = null;
+  try { if (issued) verificationLink = createVerificationLink(issued); }
+  catch (err) { linkError = err instanceof Error ? err.message : "Verification link unavailable. Keep the exported JSON."; }
+
   return <section className="page issue-page" aria-labelledby="issue-heading">
     <div className="page-heading">
-      <div><div className="eyebrow"><span className="tiny-square" /> A LITTLE RECEIPT. A LASTING PROOF.</div><h1 id="issue-heading">Make every visit <span className="serif-word">verifiable.</span></h1><p>A tamper-evident imaging receipt. No patient data.<br className="desktop-break" /> Just a small Chit, secured by QoreChain.</p></div>
-      <div className="track-badge"><Icon name="sparkles" size={24} /><div><strong>Quantum Pass</strong><span>Built for the testnet</span></div></div>
+      <div><div className="eyebrow">ISSUANCE / HASH COMMITMENT</div><h1 id="issue-heading">Issue a receipt<span className="heading-period">.</span></h1><p>Controlled parameters. Local SHA-256. One QoreX hybrid-signed anchor.</p></div>
+      <span className="instrument-tag"><Icon name="lock" size={15} /> HASH ONLY / ON-CHAIN</span>
     </div>
-
-    <ol className="steps" aria-label="Issuance steps">
-      <li className={phase === "idle" || phase === "hashing" ? "active" : "done"}><span>01</span><div><strong>Create a receipt</strong><small>Non-identifying details</small></div></li>
-      <li className={busy && phase !== "hashing" ? "active" : finished ? "done" : ""}><span>02</span><div><strong>Anchor its hash</strong><small>One hybrid transaction</small></div></li>
-      <li className={finished ? "active" : ""}><span>03</span><div><strong>Keep your Chit</strong><small>Recover. Share. Verify.</small></div></li>
-    </ol>
+    <div className="instrument-metrics" aria-label="Receipt protocol specifications"><div><span>RECEIPT SCHEMA</span><strong>v1 <small>/ 5 fields</small></strong></div><div><span>COMMITMENT</span><strong>SHA-256 <small>/ 32 B</small></strong></div><div><span>SIGNING LANE</span><strong>Hybrid <small>/ 1 tx</small></strong></div></div>
 
     <div className="issue-grid">
       <form className="panel receipt-panel" onSubmit={(event) => { void issue(event); }}>
-        <div className="panel-heading"><div><div className="section-number">THE DETAILS</div><h2>Issue a Chit</h2><p>Five fields. Zero patient data.</p></div><span className="soft-icon"><Icon name="receipt" size={23} /></span></div>
+        <div className="panel-heading"><div><div className="section-number">CONTROLLED INPUT / ZERO PII</div><h2>Receipt parameters</h2><p>Non-identifying descriptors only.</p></div><span className="panel-icon"><Icon name="receipt" size={23} /></span></div>
         <div className="code-tools"><span><span className="status-dot" /> Generated on your device</span><button className="text-button" type="button" onClick={freshCode} disabled={busy || finished}><Icon name="refresh" size={14} /> New code</button></div>
         <ReceiptFieldsForm value={draft} onChange={setDraft} disabled={busy || finished} idPrefix="issue" />
-        <div className="privacy-box"><Icon name="lock" size={19} /><div><strong>Private by design, not by promise.</strong><p>Never enter names, diagnoses, medical images, or phone numbers. Only the receipt hash goes on-chain.</p></div></div>
+        <div className="privacy-box"><Icon name="lock" size={19} /><div><strong>Data boundary</strong><p>Never enter patient identifiers, names, diagnoses, medical images, or phone numbers. Only the hash goes on-chain. Receipt JSON and shared links are plaintext.</p></div></div>
         <label className="consent-check"><input type="checkbox" checked={privacyAccepted} onChange={(event) => setPrivacyAccepted(event.target.checked)} disabled={busy || finished} /><span>I’m using only generic, non-identifying receipt fields.</span></label>
         {(error || hash.error) && <div className="alert error-alert" role="alert"><Icon name="alert" size={19} /><span>{error || hash.error}</span></div>}
         {storageNotice && <div className="alert warning-alert" role="alert"><Icon name="download" size={19} /><span>{storageNotice}</span></div>}
@@ -143,23 +152,22 @@ export function IssueView({ wallet, connect, knownCodes, pendingReceipts, onRefr
 
       <aside className="preview-column" aria-label="Receipt preview and export">
         <div className={`ticket ${issued ? "ticket-issued" : ""}`}>
-          <div className="ticket-top"><span className="ticket-brand"><Icon name="receipt" size={19} /> chit<span className="brand-period">.</span></span><span className="ticket-status">{issued ? "SUBMITTED" : unresolved ? "UNRESOLVED" : "LIVE PREVIEW"}</span></div>
-          <div className="ticket-code"><span>YOUR RECOVERY CODE</span><strong>{draft.receiptCode}</strong><p>{issued ? "Your proof, in your pocket." : "Small enough to keep. Simple enough to trust."}</p></div>
+          <div className="ticket-registration" aria-hidden="true"><span>+</span><span>+</span></div>
+          <div className="ticket-top"><span className="ticket-brand">chit<span>.</span></span><div className="ticket-tracking"><span>CRYPTOGRAPHIC RECEIPT</span><strong>SCHEMA v1 / DIANA</strong></div><span className="ticket-status">{issued ? "SUBMITTED" : unresolved ? "UNRESOLVED" : "DRAFT"}</span></div>
+          <div className="ticket-code"><span>RECOVERY SERIAL / SPECIMEN TICKET</span><strong>{ticketReceipt.receiptCode}</strong><p>{issued ? "Submission retained. Verify live chain evidence before relying on this receipt." : unresolved ? "Uncertain outcome. Recover the transaction hash; do not rebroadcast." : "PREVIEW / NOT AN ISSUED OR VERIFIED RECEIPT"}</p></div>
           <div className="ticket-divider" />
-          {issued ? <>
-            <div className="qr-wrap"><QRCodeSVG id="issued-chit-qr" value={serializeReceipt(issued)} size={256} level="M" includeMargin title={`Chit ${issued.receipt.receiptCode} receipt JSON QR`} /></div>
-            <p className="qr-caption">Scan to get the non-identifying receipt JSON.<br />No camera or wallet needed to verify.</p>
-          </> : <>
-            <dl className="ticket-fields"><div><dt>Scan category</dt><dd>{draft.scanCategory}</dd></div><div><dt>Visit date</dt><dd>{draft.visitDate || "Choose a date"}</dd></div><div><dt>Facility</dt><dd>{draft.facilityTag || "Clinic code"}</dd></div><div><dt>Note</dt><dd>{draft.note || "—"}</dd></div></dl>
-            <div className="preview-qr-placeholder"><span><Icon name={unresolved ? "clock" : "qr"} size={35} /></span><p>{unresolved ? "Transaction hash needs recovery" : "Your QR appears after submission"}</p></div>
-          </>}
-          <div className="ticket-hash"><div><Icon name="hash" size={14} /> SHA-256 RECEIPT HASH</div><code>{hash.hash ?? (hash.error ? "Waiting for valid receipt fields" : "Computing in your browser…")}</code></div>
-          <div className="ticket-footer"><Icon name="shield" size={15} /><span>secp256k1 + ML-DSA-87</span><span className="ticket-network">DIANA TESTNET</span></div>
+          {issued && verificationLink ? <><div className="qr-wrap"><QRCodeSVG id="issued-chit-qr" value={verificationLink} size={280} level="M" marginSize={4} bgColor="#ffffff" fgColor="#171c1a" title={`Chit ${issued.receipt.receiptCode} self-contained verification link`} /></div><p className="qr-caption">SCAN TO VERIFY / NO WALLET REQUIRED<br /><span>Receipt fields + transaction hash. Nothing uploaded.</span></p></> : <div className="preview-qr-placeholder"><span><Icon name={unresolved ? "clock" : "qr"} size={38} /></span><p>{issued ? "QR link unavailable — export receipt JSON" : unresolved ? "AWAITING TRANSACTION HASH" : "QR GENERATED AFTER SUBMISSION"}</p><small>{issued ? "The real transaction hash remains exportable below." : "No fabricated transaction or signature."}</small></div>}
+          <dl className="ticket-fields"><div><dt>CATEGORY</dt><dd>{ticketReceipt.scanCategory}</dd></div><div><dt>VISIT DATE</dt><dd>{ticketReceipt.visitDate || "Not set"}</dd></div><div><dt>FACILITY TAG</dt><dd>{ticketReceipt.facilityTag || "Not set"}</dd></div><div><dt>VIEW / CONTEXT</dt><dd>{ticketReceipt.note || "Not specified"}</dd></div></dl>
+          <div className="ticket-hash"><div><Icon name="hash" size={14} /> SHA-256 COMMITMENT <span>32 B</span></div><code>{ticketHash ?? (hash.error ? "Waiting for valid receipt fields" : "Computing locally…")}</code><small>CHIT:v1 / canonical five-field JSON</small></div>
+          <div className="ticket-attestation"><Icon name="shield" size={19} /><div><span>{issued ? "SIGNATURE SPECIFICATION / VERIFY ON-CHAIN" : "REQUIRED SIGNATURE SPECIFICATION"}</span><strong>NIST FIPS 204 · ML-DSA-87 · 4,627 B</strong><small>Hybrid with secp256k1. A badge is not verification.</small></div></div>
+          <div className="ticket-footer"><span>{CHAIN_ID}</span><span>HASH INTEGRITY / NOT CLINICAL TRUTH</span></div>
         </div>
 
         {issued && <div className="export-panel">
           <div className={`local-save-status ${saved ? "" : "save-warning"}`}><Icon name={saved ? "check" : "alert"} size={17} /><span>{saved ? "Saved on this browser · recover by code" : "Export now to preserve your receipt"}</span></div>
-          <div className="export-buttons"><button className="button secondary" type="button" onClick={() => { void copyJSON(); }}><Icon name="copy" size={16} /> Copy JSON</button><button className="button secondary" type="button" onClick={() => downloadText(`${issued.receipt.receiptCode}.json`, serializeReceipt(issued, true))}><Icon name="download" size={16} /> Save JSON</button></div>
+          <button className="button ink-button full-width" type="button" disabled={!verificationLink} onClick={() => { void copyVerificationLink(); }}><Icon name="copy" size={17} /> Copy Verification Link <Icon name="arrow" size={16} /></button>
+          {linkError && <p className="metadata-warning" role="alert">{linkError}</p>}
+          <div className="export-buttons"><button className="button secondary" type="button" onClick={() => { void copyJSON(); }}><Icon name="copy" size={16} /> Copy receipt JSON</button><button className="button secondary" type="button" onClick={() => downloadText(`${issued.receipt.receiptCode}.json`, serializeReceipt(issued, true))}><Icon name="download" size={16} /> Save JSON</button></div>
           <button className="button subtle full-width" type="button" onClick={() => { try { downloadQR("issued-chit-qr", issued.receipt.receiptCode); } catch (err) { setCopyNotice(err instanceof Error ? err.message : "Could not download QR."); } }}><Icon name="qr" size={16} /> Save QR image</button>
           <a className="explorer-link" href={explorerTxUrl(issued.txHash)} target="_blank" rel="noreferrer">View transaction in Explorer <Icon name="external" size={15} /></a><small className="explorer-hint">Select <strong>Testnet</strong> in Explorer.</small>
           <details className="json-details"><summary>Receipt JSON & transaction hash</summary><textarea readOnly value={serializeReceipt(issued, true)} rows={10} aria-label="Issued receipt JSON" spellCheck={false} /><p className="breakable"><strong>txHash:</strong> {issued.txHash}</p></details>

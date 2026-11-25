@@ -148,9 +148,26 @@ describe("receipt canonical schema", () => {
     expect(normalizeReceipt({ ...RECEIPT, note: spaced }).note).toBe(note);
   });
 
+  it("retains every old note and adds only the four generic controlled views", () => {
+    expect(SAFE_NOTES).toEqual([
+      "", "Visit completed", "Follow-up visit", "Receipt reissued", "Digital copy requested",
+      "PA View · Standard", "AP / Lateral View", "Follow-Up Clearance", "Baseline Screening",
+    ]);
+  });
+
+  it("preserves the exact canonical preimage and SHA-256 for each old v1 note", async () => {
+    for (const note of ["", "Visit completed", "Follow-up visit", "Receipt reissued", "Digital copy requested"]) {
+      const canonical = CANONICAL.replace('"note":""', `"note":${JSON.stringify(note)}`);
+      const receipt = { ...RECEIPT, note };
+      expect(canonicalReceiptJSON(receipt)).toBe(canonical);
+      expect(await hashReceipt(receipt)).toBe(createHash("sha256").update(canonical, "utf8").digest("hex"));
+    }
+  });
+
   it.each([
     "Patient Jane Doe", "Call +1 555 010 1234", "DOB 1990-01-01",
     "National ID 123456789", "Chest pain", "Visit completed for Jane", "https://example.test/patient",
+    "PA View · Standard for Jane", "AP / Lateral View patient 1234", "Follow-Up Clearance diagnosis", "Baseline Screening for Jane",
   ])("rejects free-text/identifying notes: %s", (note) => {
     expect(() => normalizeReceipt({ ...RECEIPT, note })).toThrow(/non-identifying|free-text|patient data/i);
   });

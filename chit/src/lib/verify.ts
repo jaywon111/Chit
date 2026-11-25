@@ -1,5 +1,6 @@
 import { HYBRID_SIG_TYPE_URL, qorechainTypes } from "@qorechain/sdk";
 import { CHAIN_ID, REST_BASE, REST_URL } from "./network.js";
+import { normalizeIssuerAddress, normalizeIssuerPolicy, type IssuerPolicy } from "./issuers.js";
 import { normalizeTxHash } from "./receipt.js";
 
 export interface HybridEvidence {
@@ -18,6 +19,8 @@ export interface ChainEvidence {
   code: number | null;
   height: string;
   timestamp: string;
+  memo: string;
+  signerAddress: string | null;
   anchoredHash: string | null;
   extension: HybridEvidence;
   classicalSignatureBytes: number | null;
@@ -29,7 +32,7 @@ export interface ChainEvidence {
 }
 
 export interface VerificationVerdict {
-  kind: "pending" | "verified" | "tampered" | "failed" | "incomplete";
+  kind: "pending" | "verified" | "tampered" | "failed" | "incomplete" | "unauthorized";
   title: string;
   detail: string;
 }
@@ -108,7 +111,18 @@ function hybridEvent(response: JsonObject): { status: string; verified: boolean 
   return { status: [...new Set(statuses.map((entry) => entry.status))].join(", "), verified: statuses.every((entry) => entry.valid) };
 }
 
-/** Never uses a supplied receiptHash as the anchored hash. Only on-chain memo. */
+function transactionSigner(body: JsonObject): string | null {
+  // Only the sender of exactly one supported on-chain message is unambiguous.
+  // Never infer an issuer from fee payer, recipient, events, or pasted metadata.
+  const messages = body.messages;
+  if (!Array.isArray(messages) || messages.length !== 1) return null;
+  const send = object(messages[0]);
+  const types = [send["@type"], send.type_url, send.typeUrl].filter((value) => value !== undefined);
+  if (!types.length || types.some((value) => value !== "/cosmos.bank.v1beta1.MsgSend")) return null;
+  try { return normalizeIssuerAddress(send.from_address); } catch { return null; }
+}
+
+/** Never uses a supplied receiptHash/issuer as chain evidence. Only the on-chain transaction. */
 export function inspectTransaction(payload: unknown, requestedTxHash: string, network: string = CHAIN_ID): ChainEvidence {
   const root = object(payload);
   const response = object(root.tx_response);
@@ -143,6 +157,7 @@ export function inspectTransaction(payload: unknown, requestedTxHash: string, ne
   return {
     txHash, chainId: network, success, code, height,
     timestamp: str(response.timestamp),
+    memo, signerAddress: transactionSigner(body),
     anchoredHash: match?.[1].toLowerCase() ?? null,
     extension, classicalSignatureBytes, classicalSignatureValid,
     pqcEventStatus: event.status, pqcEventVerified: event.verified,
@@ -151,14 +166,29 @@ export function inspectTransaction(payload: unknown, requestedTxHash: string, ne
   };
 }
 
-export function verificationVerdict(evidence: ChainEvidence | null, computedHash: string | null): VerificationVerdict {
+export function verificationVerdict(evidence: ChainEvidence | null, computedHash: string | null, policy?: IssuerPolicy): VerificationVerdict {
   if (!evidence) return { kind: "pending", title: "NOT YET VERIFIED", detail: "Fetch the transaction to check the receipt against its on-chain proof." };
   if (evidence.chainId !== CHAIN_ID) return { kind: "failed", title: "WRONG NETWORK", detail: "The node is not on qorechain-diana. No verification claim can be made." };
   if (!evidence.success) return { kind: "failed", title: "TRANSACTION NOT SUCCESSFUL", detail: evidence.code === 0 ? "The transaction has not been committed at a positive block height." : `The node reports transaction code ${evidence.code ?? "unknown"}, not 0.` };
   if (!evidence.anchoredHash) return { kind: "incomplete", title: "NO CHIT ANCHOR", detail: "This transaction has no supported CHIT:v1 hash in its memo. A hash in receipt JSON is not on-chain evidence." };
   if (!computedHash) return { kind: "pending", title: "COMPUTING HASH", detail: "Recomputing the normalized receipt. The previous verification result is not reused." };
-  if (evidence.anchoredHash !== computedHash) return { kind: "tampered", title: "TAMPERED (HASH MISMATCH)", detail: "These receipt fields do not match the hash in the transaction. Reset the fields to compare the original." };
+  if (evidence.anchoredHash !== computedHash) return { kind: "tampered", title: "HASH MISMATCH — TAMPER DETECTED", detail: "These receipt fields do not match the hash in the transaction. Reset the fields to compare the original." };
   if (!evidence.hybridVerified) return { kind: "incomplete", title: "HYBRID PROOF INCOMPLETE", detail: "The hashes match, but a supported ML-DSA-87 extension, secp256k1 signature, and successful pqc_hybrid_verify event are all required." };
+  if (policy !== undefined) {
+    let clean: IssuerPolicy;
+    try { clean = normalizeIssuerPolicy(policy); } catch {
+      return { kind: "unauthorized", title: "ISSUER NOT AUTHORIZED", detail: "The local issuer policy is invalid. Permissioned verification fails closed." };
+    }
+    if (clean.enabled) {
+      let signer: string | null = null;
+      try { signer = normalizeIssuerAddress(evidence.signerAddress); } catch { /* Missing/unsupported signer remains unauthorized. */ }
+      if (!signer || !clean.addresses.includes(signer)) {
+        return { kind: "unauthorized", title: "ISSUER NOT AUTHORIZED", detail: signer
+          ? "The hybrid-signed receipt matches, but its on-chain MsgSend sender is not in this browser's enabled issuer allowlist. This is local policy, not proof of a clinic's identity."
+          : "The hybrid-signed receipt matches, but no unique supported MsgSend sender was established from the on-chain transaction. Permissioned verification fails closed." };
+      }
+    }
+  }
   return { kind: "verified", title: "VERIFIED", detail: "The receipt matches a successful, hybrid-signed hash anchor on QoreChain Diana." };
 }
 

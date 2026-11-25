@@ -2,6 +2,7 @@ import { webcrypto } from "node:crypto";
 import { HYBRID_SIG_TYPE_URL, qorechainTypes } from "@qorechain/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CHAIN_ID, REST_BASE, REST_URL } from "../src/lib/network.js";
+import { DEMO_ISSUERS, type IssuerPolicy } from "../src/lib/issuers.js";
 import { hashReceipt, type ReceiptFields } from "../src/lib/receipt.js";
 import {
   decodeBase64,
@@ -23,6 +24,11 @@ const codec = qorechainTypes.pqcHybrid.PQCHybridSignature;
 const TEST_HASH = "ab".repeat(32);
 const TEST_TX_HASH = "CD".repeat(32);
 const OTHER_TX_HASH = "EF".repeat(32);
+const SEND_TYPE = "/cosmos.bank.v1beta1.MsgSend";
+// Deterministic synthetic addresses, not actual clinics or cryptographic fixtures.
+const TEST_SIGNER = DEMO_ISSUERS[1].address;
+const OTHER_SIGNER = DEMO_ISSUERS[2].address;
+const PERMISSIONED_POLICY: IssuerPolicy = { version: 1, enabled: true, addresses: [TEST_SIGNER] };
 const SECP_TYPE = "/cosmos.crypto.secp256k1.PubKey";
 const ETHSECP_TYPE = "/ethermint.crypto.v1.ethsecp256k1.PubKey";
 const NODE_PATH = "/cosmos/base/tendermint/v1beta1/node_info";
@@ -37,6 +43,7 @@ interface SyntheticLCD {
   tx: {
     body: {
       memo: unknown;
+      messages: unknown[];
       extension_options: unknown[];
       non_critical_extension_options: unknown[];
     };
@@ -94,6 +101,7 @@ function syntheticLCD(hash = TEST_HASH, encoding: Encoding = "expanded-snake"): 
     tx: {
       body: {
         memo: `CHIT:v1:${hash}`,
+        messages: [{ "@type": SEND_TYPE, from_address: TEST_SIGNER, to_address: TEST_SIGNER, amount: [{ denom: "uqor", amount: "1" }] }],
         extension_options: [syntheticExtension(encoding)],
         non_critical_extension_options: [],
       },
@@ -111,6 +119,8 @@ function expectIncompleteHybrid(payload: unknown): ChainEvidence {
   const evidence = inspectTransaction(payload, TEST_TX_HASH);
   expect(evidence.hybridVerified).toBe(false);
   expect(verificationVerdict(evidence, TEST_HASH).kind).toBe("incomplete");
+  // An allowlisted MsgSend signer must never rescue any existing hybrid gate.
+  expect(verificationVerdict(evidence, TEST_HASH, PERMISSIONED_POLICY).kind).toBe("incomplete");
   return evidence;
 }
 
@@ -168,6 +178,7 @@ describe("synthetic LCD classifier: supported hybrid evidence", () => {
       const evidence = inspectTransaction(syntheticLCD(TEST_HASH, encoding), TEST_TX_HASH);
       expect(evidence).toMatchObject({
         txHash: TEST_TX_HASH, chainId: CHAIN_ID, success: true, code: 0, height: "12345", anchoredHash: TEST_HASH,
+        memo: `CHIT:v1:${TEST_HASH}`, signerAddress: TEST_SIGNER,
         classicalSignatureBytes: 64, classicalSignatureValid: true,
         pqcEventStatus: "verified", pqcEventVerified: true, hybridVerified: true,
       });
@@ -202,7 +213,7 @@ describe("synthetic LCD classifier: supported hybrid evidence", () => {
     const camel = {
       ...payload,
       tx: {
-        body: { memo: payload.tx.body.memo, extensionOptions: payload.tx.body.extension_options, nonCriticalExtensionOptions: [] },
+        body: { memo: payload.tx.body.memo, messages: payload.tx.body.messages, extensionOptions: payload.tx.body.extension_options, nonCriticalExtensionOptions: [] },
         authInfo: { signerInfos: [{ publicKey: { typeUrl: SECP_TYPE, key: base64(TEST_COMPRESSED_KEY) } }] },
         signatures: payload.tx.signatures,
       },
@@ -489,6 +500,7 @@ describe("on-chain memo, transaction identity, and verdict state", () => {
   it("normalizes hash case only inside an otherwise exact CHIT:v1 memo", () => {
     const evidence = inspectTransaction(syntheticLCD(TEST_HASH.toUpperCase()), TEST_TX_HASH);
     expect(evidence.anchoredHash).toBe(TEST_HASH);
+    expect(evidence.memo).toBe(`CHIT:v1:${TEST_HASH.toUpperCase()}`);
   });
 
   it.each([
@@ -501,6 +513,7 @@ describe("on-chain memo, transaction identity, and verdict state", () => {
     payload.tx.body.memo = memo;
     const declaredHashPayload = { ...payload, receiptHash: TEST_HASH, tx_response: { ...payload.tx_response, receiptHash: TEST_HASH } };
     const evidence = inspectTransaction(declaredHashPayload, TEST_TX_HASH);
+    expect(evidence.memo).toBe(typeof memo === "string" ? memo : "");
     expect(evidence.anchoredHash).toBeNull();
     expect(verificationVerdict(evidence, TEST_HASH).kind).toBe("incomplete");
   });
@@ -567,6 +580,115 @@ describe("on-chain memo, transaction identity, and verdict state", () => {
       expect(verificationVerdict(evidence, null).kind).toBe("pending");
       expect(verificationVerdict(evidence, await hashReceipt(TEST_RECEIPT)).kind).toBe("verified");
     }
+  });
+});
+
+describe("on-chain issuer evidence and optional permissioned verdicts", () => {
+  it("exposes the exact body memo and unique SDK-validated MsgSend sender", () => {
+    const evidence = inspectTransaction(syntheticLCD(), TEST_TX_HASH);
+    expect(evidence.memo).toBe(`CHIT:v1:${TEST_HASH}`);
+    expect(evidence.signerAddress).toBe(TEST_SIGNER);
+    expect(verificationVerdict(evidence, TEST_HASH, PERMISSIONED_POLICY)).toMatchObject({ kind: "verified", title: "VERIFIED" });
+  });
+
+  it.each(["@type", "type_url", "typeUrl"])("accepts an unambiguous expanded MsgSend type alias %s", (key) => {
+    const payload = syntheticLCD();
+    payload.tx.body.messages = [{ [key]: SEND_TYPE, from_address: TEST_SIGNER, to_address: TEST_SIGNER }];
+    expect(inspectTransaction(payload, TEST_TX_HASH).signerAddress).toBe(TEST_SIGNER);
+  });
+
+  it("does not replace the raw memo/issuer with pasted receipt or response metadata", () => {
+    const payload = syntheticLCD();
+    payload.tx.body.memo = "NOT A CHIT MEMO";
+    const contaminated = { ...payload, memo: `CHIT:v1:${TEST_HASH}`, receiptHash: TEST_HASH, signerAddress: OTHER_SIGNER,
+      tx_response: { ...payload.tx_response, memo: `CHIT:v1:${TEST_HASH}`, signerAddress: OTHER_SIGNER } };
+    const evidence = inspectTransaction(contaminated, TEST_TX_HASH);
+    expect(evidence.memo).toBe("NOT A CHIT MEMO");
+    expect(evidence.anchoredHash).toBeNull();
+    expect(evidence.signerAddress).toBe(TEST_SIGNER);
+    expect(verificationVerdict(evidence, TEST_HASH, PERMISSIONED_POLICY)).toMatchObject({ kind: "incomplete", title: "NO CHIT ANCHOR" });
+  });
+
+  it("does not authorize a recipient, fee payer, event signer, or pasted issuer instead of the actual sender", () => {
+    const payload = syntheticLCD();
+    payload.tx.body.messages = [{ "@type": SEND_TYPE, from_address: OTHER_SIGNER, to_address: TEST_SIGNER }];
+    const contaminated = {
+      ...payload, issuer: TEST_SIGNER, signerAddress: TEST_SIGNER,
+      tx: { ...payload.tx, auth_info: { ...payload.tx.auth_info, fee: { payer: TEST_SIGNER, granter: TEST_SIGNER } } },
+      tx_response: { ...payload.tx_response, signerAddress: TEST_SIGNER,
+        events: [...payload.tx_response.events, { type: "message", attributes: [{ key: "sender", value: TEST_SIGNER }] }] },
+    };
+    const evidence = inspectTransaction(contaminated, TEST_TX_HASH);
+    expect(evidence.signerAddress).toBe(OTHER_SIGNER);
+    expect(verificationVerdict(evidence, TEST_HASH, PERMISSIONED_POLICY)).toMatchObject({ kind: "unauthorized", title: "ISSUER NOT AUTHORIZED" });
+  });
+
+  it("authorizes only the sender, independently of a different recipient or fee payer", () => {
+    const payload = syntheticLCD();
+    payload.tx.body.messages = [{ "@type": SEND_TYPE, from_address: TEST_SIGNER, to_address: OTHER_SIGNER }];
+    const evidence = inspectTransaction({ ...payload, tx: { ...payload.tx, auth_info: { ...payload.tx.auth_info, fee: { payer: OTHER_SIGNER } } } }, TEST_TX_HASH);
+    expect(evidence.signerAddress).toBe(TEST_SIGNER);
+    expect(verificationVerdict(evidence, TEST_HASH, PERMISSIONED_POLICY).kind).toBe("verified");
+  });
+
+  it("denies unlisted/missing signers and an enabled empty allowlist, but preserves explicit permissionless behavior", () => {
+    const evidence = inspectTransaction(syntheticLCD(), TEST_TX_HASH);
+    expect(verificationVerdict(evidence, TEST_HASH, { version: 1, enabled: true, addresses: [OTHER_SIGNER] })).toMatchObject({ kind: "unauthorized", title: "ISSUER NOT AUTHORIZED" });
+    expect(verificationVerdict(evidence, TEST_HASH, { version: 1, enabled: true, addresses: [] }).kind).toBe("unauthorized");
+    expect(verificationVerdict({ ...evidence, signerAddress: null }, TEST_HASH, PERMISSIONED_POLICY).kind).toBe("unauthorized");
+    expect(verificationVerdict({ ...evidence, signerAddress: "bad" }, TEST_HASH, PERMISSIONED_POLICY).kind).toBe("unauthorized");
+    expect(verificationVerdict({ ...evidence, signerAddress: null }, TEST_HASH).kind).toBe("verified");
+    expect(verificationVerdict({ ...evidence, signerAddress: null }, TEST_HASH, { version: 1, enabled: false, addresses: [] }).kind).toBe("verified");
+  });
+
+  const unsupportedMessages: Array<[string, unknown]> = [
+    ["missing messages", undefined], ["non-array messages", { "@type": SEND_TYPE, from_address: TEST_SIGNER }],
+    ["empty messages", []], ["non-object message", [null]],
+    ["unsupported message", [{ "@type": "/cosmos.bank.v1beta1.MsgMultiSend", from_address: TEST_SIGNER }]],
+    ["missing sender", [{ "@type": SEND_TYPE, to_address: TEST_SIGNER }]],
+    ["null sender", [{ "@type": SEND_TYPE, from_address: null }]],
+    ["bad sender", [{ "@type": SEND_TYPE, from_address: "qor1invalid" }]],
+    ["uppercase sender", [{ "@type": SEND_TYPE, from_address: TEST_SIGNER.toUpperCase() }]],
+    ["hex sender", [{ "@type": SEND_TYPE, from_address: `0x${"11".repeat(20)}` }]],
+    ["camel-only sender", [{ "@type": SEND_TYPE, fromAddress: TEST_SIGNER }]],
+    ["unexpanded Any", [{ type_url: SEND_TYPE, value: "TEST ONLY" }]],
+    ["contradictory type aliases", [{ "@type": SEND_TYPE, typeUrl: "/cosmos.authz.v1beta1.MsgExec", from_address: TEST_SIGNER }]],
+    ["multiple same-sender sends", [{ "@type": SEND_TYPE, from_address: TEST_SIGNER }, { "@type": SEND_TYPE, from_address: TEST_SIGNER }]],
+    ["send plus unsupported message", [{ "@type": SEND_TYPE, from_address: TEST_SIGNER }, { "@type": "/cosmos.authz.v1beta1.MsgExec" }]],
+  ];
+
+  it.each(unsupportedMessages)("fails closed on %s in permissioned mode without weakening old crypto gates", (_label, messages) => {
+    const payload = syntheticLCD();
+    const evidence = inspectTransaction({ ...payload, signerAddress: TEST_SIGNER, tx: { ...payload.tx, body: { ...payload.tx.body, messages } } }, TEST_TX_HASH);
+    expect(evidence.signerAddress).toBeNull();
+    expect(evidence.hybridVerified).toBe(true); // synthetic node-classification shape, not real cryptography
+    expect(verificationVerdict(evidence, TEST_HASH).kind).toBe("verified");
+    expect(verificationVerdict(evidence, TEST_HASH, PERMISSIONED_POLICY)).toMatchObject({ kind: "unauthorized", title: "ISSUER NOT AUTHORIZED" });
+  });
+
+  it("cannot let a matching issuer override network, transaction, anchor, pending, or hash failures", () => {
+    const evidence = inspectTransaction(syntheticLCD(), TEST_TX_HASH);
+    expect(verificationVerdict({ ...evidence, chainId: "qorechain-vladi" }, TEST_HASH, PERMISSIONED_POLICY)).toMatchObject({ kind: "failed", title: "WRONG NETWORK" });
+    expect(verificationVerdict({ ...evidence, success: false, code: 7 }, TEST_HASH, PERMISSIONED_POLICY)).toMatchObject({ kind: "failed", title: "TRANSACTION NOT SUCCESSFUL" });
+    expect(verificationVerdict({ ...evidence, anchoredHash: null }, TEST_HASH, PERMISSIONED_POLICY)).toMatchObject({ kind: "incomplete", title: "NO CHIT ANCHOR" });
+    expect(verificationVerdict({ ...evidence, hybridVerified: false }, TEST_HASH, PERMISSIONED_POLICY)).toMatchObject({ kind: "incomplete", title: "HYBRID PROOF INCOMPLETE" });
+    expect(verificationVerdict({ ...evidence, hybridVerified: false, signerAddress: OTHER_SIGNER }, TEST_HASH, PERMISSIONED_POLICY)).toMatchObject({ kind: "incomplete", title: "HYBRID PROOF INCOMPLETE" });
+    expect(verificationVerdict(evidence, null, PERMISSIONED_POLICY)).toMatchObject({ kind: "pending", title: "COMPUTING HASH" });
+    expect(verificationVerdict(null, TEST_HASH, PERMISSIONED_POLICY)).toMatchObject({ kind: "pending", title: "NOT YET VERIFIED" });
+    expect(verificationVerdict(evidence, "12".repeat(32), PERMISSIONED_POLICY)).toMatchObject({ kind: "tampered", title: "HASH MISMATCH — TAMPER DETECTED" });
+    expect(verificationVerdict({ ...evidence, signerAddress: OTHER_SIGNER }, "12".repeat(32), PERMISSIONED_POLICY)).toMatchObject({ kind: "tampered", title: "HASH MISMATCH — TAMPER DETECTED" });
+  });
+
+  it.each([
+    null, {}, { enabled: false }, { version: 1, enabled: "false", addresses: [] },
+    { version: 1, enabled: false, addresses: ["bad"] }, { version: 2, enabled: false, addresses: [] },
+    { version: 1, enabled: true, addresses: new Array(1) },
+    { version: 1, enabled: true, addresses: [TEST_SIGNER, TEST_SIGNER] },
+    { version: 1, enabled: true, addresses: [TEST_SIGNER], issuerName: "SYNTHETIC" },
+  ].map((value) => ({ value })))("fails closed on malformed runtime policy even if it tries to disable permissioning: $value", ({ value }) => {
+    const evidence = inspectTransaction(syntheticLCD(), TEST_TX_HASH);
+    expect(verificationVerdict(evidence, TEST_HASH, value as IssuerPolicy)).toMatchObject({ kind: "unauthorized", title: "ISSUER NOT AUTHORIZED" });
+    expect(verificationVerdict(evidence, "12".repeat(32), value as IssuerPolicy).kind).toBe("tampered");
   });
 });
 

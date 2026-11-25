@@ -1,30 +1,8 @@
 import { CHAIN_ID } from "./network.js";
+import { parseVerificationLink } from "./share.js";
+import { RECEIPT_KEYS, normalizeHash, normalizeReceipt, normalizeTxHash, type ReceiptFields } from "./receiptSchema.js";
 
-export const SCAN_CATEGORIES = [
-  "Chest X-Ray",
-  "Pelvis X-Ray",
-  "Limb X-Ray",
-  "Ultrasound",
-  "Non-Contrast CT",
-  "Custom",
-] as const;
-
-// A controlled vocabulary keeps the optional note from becoming a PII field.
-export const SAFE_NOTES = [
-  "",
-  "Visit completed",
-  "Follow-up visit",
-  "Receipt reissued",
-  "Digital copy requested",
-] as const;
-
-export interface ReceiptFields {
-  receiptCode: string;
-  scanCategory: string;
-  visitDate: string;
-  facilityTag: string;
-  note: string;
-}
+export { SAFE_NOTES, SCAN_CATEGORIES, normalizeHash, normalizeReceipt, normalizeTxHash, type ReceiptFields } from "./receiptSchema.js";
 
 export interface ReceiptRecord {
   version: 1;
@@ -48,7 +26,6 @@ export interface PendingReceipt {
   receiptHash: string;
 }
 
-const RECEIPT_KEYS = ["receiptCode", "scanCategory", "visitDate", "facilityTag", "note"];
 const MAX_PAYLOAD_LENGTH = 12_000;
 export const STORAGE_KEY = "chit.receipts.v1";
 export const PENDING_STORAGE_KEY = "chit.pending.v1";
@@ -65,41 +42,6 @@ function onlyKeys(object: Record<string, unknown>, keys: readonly string[]): voi
   }
 }
 
-function text(value: unknown, field: string, optional = false): string {
-  if (optional && value === undefined) return "";
-  if (typeof value !== "string") throw new Error(`${field} must be text.`);
-  return value.normalize("NFC").trim().replace(/\s+/gu, " ");
-}
-
-/** Fixed alphabetical key order, NFC, trimmed/collapsed whitespace; no extra fields. */
-export function normalizeReceipt(value: unknown): ReceiptFields {
-  if (!isObject(value)) throw new Error("A receipt must be a JSON object.");
-  onlyKeys(value, RECEIPT_KEYS);
-  const receiptCode = text(value.receiptCode, "Receipt code").toUpperCase();
-  if (!/^CHT-[A-Z0-9]{4,8}$/.test(receiptCode)) {
-    throw new Error("Use a receipt code such as CHT-4821 (4–8 letters or digits after CHT-). Do not use a patient identifier.");
-  }
-  const categoryText = text(value.scanCategory, "Scan category");
-  const scanCategory = SCAN_CATEGORIES.find((category) => category.toLowerCase() === categoryText.toLowerCase());
-  if (!scanCategory) throw new Error("Choose a supported imaging category or Custom; never a diagnosis.");
-  const visitDate = text(value.visitDate, "Visit date");
-  const date = new Date(`${visitDate}T00:00:00.000Z`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(visitDate) || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== visitDate || visitDate < "1900-01-01" || visitDate > "2100-12-31") {
-    throw new Error("Enter a real visit date in YYYY-MM-DD format (1900–2100).");
-  }
-  const facilityTag = text(value.facilityTag, "Facility tag").toUpperCase();
-  if (!/^[A-Z][A-Z0-9]{1,11}(?:-[A-Z0-9]{1,4})?$/.test(facilityTag)) {
-    throw new Error("Use a short, generic facility code such as CLINIC-A, not a name or phone number.");
-  }
-  const noteText = text(value.note, "Visit note", true);
-  const note = SAFE_NOTES.find((entry) => entry.toLowerCase() === noteText.toLowerCase());
-  if (note === undefined) {
-    throw new Error("Use an allowed non-identifying note, or leave it empty. Free-text notes and patient data are not accepted.");
-  }
-  // Do not change this insertion order without introducing a new schema version.
-  return { facilityTag, note, receiptCode, scanCategory, visitDate };
-}
-
 export function canonicalReceiptJSON(receipt: unknown): string {
   return JSON.stringify(normalizeReceipt(receipt));
 }
@@ -111,20 +53,6 @@ export async function hashReceipt(receipt: unknown): Promise<string> {
   const bytes = new TextEncoder().encode(canonicalReceiptJSON(receipt));
   const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-export function normalizeHash(value: unknown): string {
-  if (typeof value !== "string" || !/^[a-fA-F0-9]{64}$/.test(value.trim())) {
-    throw new Error("A receipt hash must contain exactly 64 hexadecimal characters.");
-  }
-  return value.trim().toLowerCase();
-}
-
-export function normalizeTxHash(value: unknown): string {
-  if (typeof value !== "string") throw new Error("Enter the transaction hash.");
-  const hash = value.trim().replace(/^0x/i, "");
-  if (!/^[a-fA-F0-9]{64}$/.test(hash)) throw new Error("A transaction hash must contain 64 hexadecimal characters.");
-  return hash.toUpperCase();
 }
 
 export function anchorMemo(receiptHash: string): string {
@@ -141,12 +69,27 @@ export function serializeReceipt(record: ReceiptRecord, pretty = false): string 
   return JSON.stringify(clean, null, pretty ? 2 : undefined);
 }
 
-/** Accept a Chit envelope, or flat receipt JSON accompanied by a transaction hash. */
+/** Dispatch locally between legacy JSON and a compact verification URL/fragment. */
 export function parseReceiptPayload(payload: string, txHashOverride = ""): ImportedReceipt {
-  if (!payload.trim()) throw new Error("Paste receipt JSON or scan a Chit QR and paste its text.");
+  if (typeof payload !== "string" || !payload.trim()) throw new Error("Paste receipt JSON, a verification URL, or a #verify= fragment.");
+  if (payload.length > MAX_PAYLOAD_LENGTH) throw new Error("Receipt payload is too large. Only small, non-identifying receipts are accepted.");
+  const trimmed = payload.trim();
+  if (trimmed.startsWith("#") || /^https?:\/\//iu.test(trimmed)) {
+    const input = parseVerificationLink(trimmed);
+    if (txHashOverride.trim() && normalizeTxHash(txHashOverride) !== input.txHash) {
+      throw new Error("The supplied transaction hash conflicts with the hash in the verification link.");
+    }
+    return input;
+  }
+  return parseReceiptJSONPayload(payload, txHashOverride);
+}
+
+/** Legacy Chit envelope or flat receipt JSON, with all original schema guards. */
+export function parseReceiptJSONPayload(payload: string, txHashOverride = ""): ImportedReceipt {
+  if (typeof payload !== "string" || !payload.trim()) throw new Error("Paste receipt JSON or scan a Chit QR and paste its text.");
   if (payload.length > MAX_PAYLOAD_LENGTH) throw new Error("Receipt JSON is too large. Only small, non-identifying JSON receipts are accepted.");
   let parsed: unknown;
-  try { parsed = JSON.parse(payload); } catch { throw new Error("This is not valid receipt JSON. QR payloads contain JSON, not an image or a URL."); }
+  try { parsed = JSON.parse(payload); } catch { throw new Error("This is not valid receipt JSON. Use a Chit JSON object or import a #verify= link."); }
   if (!isObject(parsed)) throw new Error("Receipt JSON must be an object.");
   const nested = Object.prototype.hasOwnProperty.call(parsed, "receipt");
   onlyKeys(parsed, nested

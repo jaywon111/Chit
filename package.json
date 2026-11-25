@@ -1,0 +1,14 @@
+{
+  "name": "chit-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "setup": "npm --prefix chit install",
+    "dev": "npm --prefix chit run dev -- --host 0.0.0.0",
+    "build": "npm --prefix chit run build",
+    "typecheck": "npm --prefix chit run typecheck",
+    "test": "npm --prefix chit run test",
+    "preview": "npm --prefix chit run preview -- --host 0.0.0.0"
+  }
+}

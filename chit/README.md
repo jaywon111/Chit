@@ -5,6 +5,8 @@ A mobile-first receipt-integrity instrument for the **QoreChain Quantum Pass** t
 
 Live deployment: **[chit-pink.vercel.app](https://chit-pink.vercel.app)**
 
+Pitch Deck: **[https://docs.google.com/presentation/d/1adjii0QRTwivICX0u4pgp6kqkUAczHsPWF3oU--igOc/edit?usp=drivesdk](https://docs.google.com/presentation/d/1adjii0QRTwivICX0u4pgp6kqkUAczHsPWF3oU--igOc/edit?usp=drivesdk)**
+
 ---
 
 ## Why Chit Exists

@@ -78,3 +78,7 @@ Trust & Limitations
  * What it does not prove: It does not certify clinical accuracy, prove a physical visit occurred, authenticate patient identity/consent or clinic licensure, or encrypt/anonymize plaintext receipt payloads, URLs, or localStorage.
 License
 MIT License — see LICENSE. Built with @qorechain/sdk, React, TypeScript, Vite, qrcode.react, and Vitest.
+
+## Trust Model & Next Steps (Post-MVP)
+- **Integrity (Live in MVP):** Verifies that a receipt pass has not been altered against its anchored cryptographic record on `qorechain-diana` while keeping patient PII off-chain.
+- **Authority / Permissioned Issuers (Next Step):** Anchoring a hash proves integrity rather than real-world scan authenticity on its own. Our next step after MVP is introducing allowlisted/permissioned clinic and diagnostic center issuers so verifiers can distinguish an anchored record from an authorized issuer.

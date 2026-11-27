@@ -9,6 +9,25 @@ export const SCAN_CATEGORIES = [
   "Custom",
 ] as const;
 
+// Only generic procedure labels can leave the custom input or appear in a receipt.
+export const CUSTOM_SCAN_LABELS = [
+  "Pelvic Ultrasound",
+  "ECG",
+  "Blood Panel",
+  "Abdominal Ultrasound",
+  "Doppler Ultrasound",
+  "MRI",
+  "Brain MRI",
+  "Spine MRI",
+  "Contrast CT",
+  "Mammography",
+  "Bone Density Scan",
+  "Echocardiogram",
+  "Complete Blood Count",
+  "Urinalysis",
+  "Spirometry",
+] as const;
+
 // Retain old values so existing v1 receipts keep the same canonical bytes.
 // This is a controlled vocabulary, never a free-text clinical/PII field.
 export const SAFE_NOTES = [
@@ -43,6 +62,11 @@ function text(value: unknown, field: string, optional = false): string {
   return value.normalize("NFC").trim().replace(/\s+/gu, " ");
 }
 
+export function matchCustomScanLabel(value: string): string | undefined {
+  const candidate = text(value, "Scan category").toLowerCase();
+  return CUSTOM_SCAN_LABELS.find((label) => label.toLowerCase() === candidate);
+}
+
 /** Fixed alphabetical key order, NFC, trimmed/collapsed whitespace; no extra fields. */
 export function normalizeReceipt(value: unknown): ReceiptFields {
   if (!isObject(value)) throw new Error("A receipt must be a JSON object.");
@@ -54,8 +78,11 @@ export function normalizeReceipt(value: unknown): ReceiptFields {
     throw new Error("Use a receipt code such as CHT-4821 (4–8 letters or digits after CHT-). Do not use a patient identifier.");
   }
   const categoryText = text(value.scanCategory, "Scan category");
-  const scanCategory = SCAN_CATEGORIES.find((category) => category.toLowerCase() === categoryText.toLowerCase());
-  if (!scanCategory) throw new Error("Choose a supported imaging category or Custom; never a diagnosis.");
+  if (!categoryText) throw new Error("Enter an approved custom scan or test type from the suggestions.");
+  // Keep the bare "Custom" value valid for older v1 receipts; Issue requires a label.
+  const scanCategory = SCAN_CATEGORIES.find((category) => category.toLowerCase() === categoryText.toLowerCase())
+    ?? matchCustomScanLabel(categoryText);
+  if (!scanCategory) throw new Error("Choose a supported imaging category or an approved custom scan or test type; never a diagnosis.");
   const visitDate = text(value.visitDate, "Visit date");
   const date = new Date(`${visitDate}T00:00:00.000Z`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(visitDate) || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== visitDate || visitDate < "1900-01-01" || visitDate > "2100-12-31") {

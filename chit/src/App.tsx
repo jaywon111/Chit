@@ -102,7 +102,19 @@ export function App(): JSX.Element {
     <header className="site-header">
       <div className="header-identity"><a className="brand" href="#" onClick={(event) => { event.preventDefault(); setView("verify"); }} aria-label="Chit — verify a pass">chit<span>.</span></a><span className="brand-description">RECEIPT PASSES</span></div>
       {view === "issue" && <NetworkStatus />}
-      {view === "issue" && (wallet ? <button className="wallet-button connected" type="button" title="Forget the local connection; wallet permissions are not revoked" aria-label={`Connected QoreX account ${wallet.address}. Disconnect locally.`} onClick={() => { setWallet(null); setWalletError(null); }}><span className="status-dot" /><span>{wallet.address.slice(0, 8)}…{wallet.address.slice(-5)}</span><Icon name="wallet" size={16} /></button> : <button className="wallet-button" type="button" disabled={connecting} onClick={() => { void connect().catch(() => undefined); }}>{connecting ? <span className="spinner" /> : <Icon name="wallet" size={17} />}<span>{connecting ? "Connecting…" : "Connect QoreX"}</span></button>)}
+      {view === "issue" && (wallet ? (
+        <button key="connected" className="wallet-button connected" type="button" title="Forget the local connection; wallet permissions are not revoked" aria-label={`Connected QoreX account ${wallet.address}. Disconnect locally.`} onClick={() => { setWallet(null); setWalletError(null); }}>
+          <span className="status-dot" /><span className="wallet-address">{wallet.address.slice(0, 8)}…{wallet.address.slice(-5)}</span><Icon name="wallet" size={16} />
+        </button>
+      ) : (
+        <button key="connect" className="wallet-button" type="button" disabled={connecting} onClick={(event) => {
+          const button = event.currentTarget;
+          void connect().catch(() => undefined).finally(() => button.blur());
+        }}>
+          {connecting ? <span className="spinner" /> : <Icon name="wallet" size={17} />}
+          <span>{connecting ? "Connecting…" : "Connect QoreX"}</span>
+        </button>
+      ))}
     </header>
     <div className="workspace-frame">
       <main id="workspace-main" className="workspace-main" tabIndex={-1}>

@@ -81,6 +81,7 @@ export function IssueView({ wallet, connect, knownCodes, pendingReceipts, onRefr
     let recovery: PendingReceipt | null = null;
     try {
       if (!privacyAccepted) throw new Error("Confirm that all receipt fields are non-identifying before continuing.");
+      if (draft.scanCategory === "Custom") throw new Error("Choose an approved custom scan or test type before issuing.");
       const receipt = normalizeReceipt(draft);
       ensureReceiptStorage(receipt.receiptCode);
       setPhase("hashing");

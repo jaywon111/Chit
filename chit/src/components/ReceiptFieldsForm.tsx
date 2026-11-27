@@ -1,4 +1,5 @@
-import { SAFE_NOTES, SCAN_CATEGORIES, type ReceiptFields } from "../lib/receipt.js";
+import { useState } from "react";
+import { CUSTOM_SCAN_LABELS, matchCustomScanLabel, SAFE_NOTES, SCAN_CATEGORIES, type ReceiptFields } from "../lib/receiptSchema.js";
 
 interface ReceiptFieldsFormProps {
   value: ReceiptFields;
@@ -10,6 +11,11 @@ interface ReceiptFieldsFormProps {
 }
 
 export function ReceiptFieldsForm({ value, onChange, disabled = false, editing = false, original, idPrefix }: ReceiptFieldsFormProps): JSX.Element {
+  // Keep unapproved text in this input only; never put it in receipt fields.
+  const [customEntry, setCustomEntry] = useState("");
+  const selectedCategory = SCAN_CATEGORIES.find((category) => category === value.scanCategory) ?? "Custom";
+  const matchedEntry = matchCustomScanLabel(customEntry) ?? "";
+  const customValue = value.scanCategory === "Custom" ? "" : matchedEntry === value.scanCategory ? customEntry : value.scanCategory;
   const update = (key: keyof ReceiptFields, text: string): void => onChange({ ...value, [key]: text });
   const modified = (key: keyof ReceiptFields): boolean => !!(editing && original && value[key] !== original[key]);
   const fieldClass = (key: keyof ReceiptFields): string => `field${modified(key) ? " field-modified" : ""}`;
@@ -24,10 +30,26 @@ export function ReceiptFieldsForm({ value, onChange, disabled = false, editing =
     </div>
     <div className={fieldClass("scanCategory")}>
       <label htmlFor={`${idPrefix}-category`}>Scan type {editTag("scanCategory")}</label>
-      <select id={`${idPrefix}-category`} name="scanCategory" value={value.scanCategory} onChange={(event) => update("scanCategory", event.target.value)} required>
+      <select id={`${idPrefix}-category`} name="scanCategory" value={selectedCategory} onChange={(event) => {
+        const category = event.currentTarget.value;
+        setCustomEntry("");
+        update("scanCategory", category === "Custom" ? "" : category);
+      }} required>
         {SCAN_CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}
       </select>
     </div>
+    {selectedCategory === "Custom" && <div className={fieldClass("scanCategory")}>
+      <label htmlFor={`${idPrefix}-custom-scan`}>Custom scan or test type</label>
+      <input id={`${idPrefix}-custom-scan`} type="text" value={customValue} onChange={(event) => {
+        const entry = event.currentTarget.value;
+        setCustomEntry(entry);
+        update("scanCategory", matchCustomScanLabel(entry) ?? "");
+      }} list={`${idPrefix}-custom-scan-options`} placeholder="e.g. Pelvic Ultrasound, ECG, Blood Panel" required={value.scanCategory !== "Custom"} maxLength={40} autoComplete="off" autoCorrect="off" spellCheck={false} aria-describedby={`${idPrefix}-custom-scan-help`} />
+      <datalist id={`${idPrefix}-custom-scan-options`}>
+        {CUSTOM_SCAN_LABELS.map((label) => <option key={label} value={label} />)}
+      </datalist>
+      <small id={`${idPrefix}-custom-scan-help`}>Enter a generic test type from the suggestions. No names, diagnoses, patient IDs, or phone numbers.</small>
+    </div>}
     <div className="field-row">
       <div className={fieldClass("visitDate")}>
         <label htmlFor={`${idPrefix}-date`}>Visit date {editTag("visitDate")}</label>

@@ -183,8 +183,9 @@ export function VerifyView({ active, records, seed, onSave }: { active: boolean;
   function tamper(): void {
     if (!fields || !original) return;
     copySequence.current += 1; setSaveError(null);
-    const index = SCAN_CATEGORIES.indexOf(original.receipt.scanCategory as typeof SCAN_CATEGORIES[number]);
-    setFields({ ...fields, scanCategory: SCAN_CATEGORIES[(index + 1) % SCAN_CATEGORIES.length] });
+    const presets = SCAN_CATEGORIES.filter((category) => category !== "Custom");
+    const index = presets.findIndex((category) => category === original.receipt.scanCategory);
+    setFields({ ...fields, scanCategory: presets[(index + 1) % presets.length] });
     setNotice("Scan type changed in the test copy only.");
   }
 
@@ -236,6 +237,10 @@ export function VerifyView({ active, records, seed, onSave }: { active: boolean;
   return <section className="page verify-page" aria-labelledby="verify-heading">
     <div className="page-heading"><div><h1 id="verify-heading">Verify a pass<span className="heading-period">.</span></h1><p>Scan a Chit QR Pass or upload a saved pass image.</p></div></div>
     <QrPassScanner enabled={active && !busy} resetToken={scanReset} onBegin={beginScan} />
+    <div className="sample-toolbar">
+      <button className="button sample-button" type="button" disabled={busy} aria-describedby="verify-sample-help" onClick={() => { void loadSample(); }}><Icon name="globe" size={16} /> <span>Load Live Testnet Sample</span><Icon name="arrow" size={15} /></button>
+      <p id="verify-sample-help">Try a demo pass right away without a QR code.</p>
+    </div>
 
     {showResult && <section className="receipt-result" aria-label="Receipt check">
       <div className={`verdict-banner verdict-${verdict.kind}`} role="status">
@@ -288,7 +293,6 @@ export function VerifyView({ active, records, seed, onSave }: { active: boolean;
               </div>
             </div>
           </div>}
-          <div className="sample-toolbar"><button className="button sample-button" type="button" disabled={busy} onClick={() => { void loadSample(); }}><Icon name="globe" size={16} /> <span>Load Live Testnet Sample</span><Icon name="arrow" size={15} /></button><span>Try a demo receipt without a pass.</span></div>
         </form>
         <IssuerPolicyPanel state={issuerState} onChange={setIssuerState} signerAddress={evidence?.signerAddress ?? null} />
         <LocalFileFingerprint />

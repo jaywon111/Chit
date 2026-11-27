@@ -4,6 +4,7 @@
 A mobile-first receipt-integrity instrument for the **QoreChain Quantum Pass** track (`qorechain-diana` testnet). Chit lets clinics or operators generate a non-identifying diagnostic receipt, compute a canonical **SHA-256** commitment locally in the browser, anchor that hash on-chain via **one QoreX native hybrid-signed transaction** (`secp256k1` + `ML-DSA-87`, NIST FIPS 204), and verify integrity or simulate tampering without storing patient data or running a backend server.
 
 Live deployment: **[chit-pink.vercel.app](https://chit-pink.vercel.app)**
+
 Pitch Deck: **[https://docs.google.com/presentation/d/1adjii0QRTwivICX0u4pgp6kqkUAczHsPWF3oU--igOc/edit?usp=drivesdk](https://docs.google.com/presentation/d/1adjii0QRTwivICX0u4pgp6kqkUAczHsPWF3oU--igOc/edit?usp=drivesdk)**
 
 ---

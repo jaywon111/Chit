@@ -3,22 +3,22 @@
 :root {
   color-scheme: light;
   font-family: "Helvetica Neue", "Avenir Next", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #171c1a;
-  background: #f3f1ea;
+  color: var(--ink);
+  background: var(--background);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --background: #f3f1ea;
-  --paper: #fffefa;
-  --ink: #171c1a;
-  --muted: #646b65;
-  --line: #d6d8ce;
-  --line-strong: #aeb6aa;
-  --control-line: #87917f;
-  --green: #164e3c;
-  --emerald: #16704e;
-  --mint: #edf5ee;
+  --background: #F8F7F4;
+  --paper: #FFFFFF;
+  --ink: #18181B;
+  --muted: #52525B;
+  --line: #DADAD7;
+  --line-strong: #A8AAA5;
+  --control-line: #858782;
+  --green: #15803D;
+  --emerald: #15803D;
+  --mint: #ECF6EF;
   --crimson: #a91835;
   --crimson-wash: #fff0f2;
   --amber: #795b21;
@@ -576,6 +576,76 @@ summary { cursor: pointer; }
   .field input, .field select, .field textarea, .field .code-input, .search-input-wrap input, .json-details textarea { font-size: 16px; }
   .icon-button { min-width: 44px; min-height: 44px; padding: 10px; }
 }
+/* Patient workspace, disclosures, and the clinic handoff. */
+.brand, .wallet-button, .text-button, .button, .icon-button, .field :is(input, select, textarea),
+.search-input-wrap input, .saved-chips > button, .recovery-open, .segmented-control button,
+.policy-switch, .policy-switch input, .explorer-link, .proof-links a, .issuer-inspector > summary,
+.canonical-inspector > summary, .raw-evidence > summary, .source-details > summary { min-height: 48px; }
+.brand { align-items: center; }
+.icon-button { min-width: 48px; }
+.mobile-nav > button { font-size: 12px; }
+.workspace-tabs button { padding-inline: 10px; font-size: 14px; }
+.workspace-classification, .site-footer { font: 12px/1.6 system-ui, sans-serif; }
+.page-heading > div > p:not(.eyebrow) { font-size: 16px; line-height: 1.6; }
+.page-heading .eyebrow { font-size: 11px; text-transform: uppercase; }
+.verify-page { max-width: 960px; margin-inline: auto; }
+.issue-page, .issue-utilities { max-width: 1120px; margin-inline: auto; }
+.utility-deck.issue-utilities { grid-template-columns: minmax(0, 1fr); }
+.protocol-page { max-width: 720px; margin-inline: auto; }
+.panel.local-file-card, .panel.local-recovery { background: var(--paper); }
+.about-card, .clinic-help { display: grid; gap: 14px; }
+.about-card > div { display: grid; gap: 8px; }
+.about-card > div + div { border-top: 1px solid var(--line); padding-top: 14px; }
+.about-card p, .clinic-help p { color: var(--muted); font-size: 15px; }
+
+.qr-scanner, .receipt-summary { display: grid; justify-items: start; gap: 16px; }
+.qr-scanner .alert { width: 100%; margin: 0; }
+.scan-actions, .pass-actions, .clinic-actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; width: 100%; }
+.qr-scanner .button, .receipt-summary .button, .patient-pass .button, .clinic-actions .button, .receipt-panel .button { font-size: 14px; }
+.qr-camera { width: min(100%, 480px); min-width: 0; overflow: hidden; justify-self: center; }
+.qr-camera video { display: block; width: 100%; max-height: 55vh; }
+.scan-status, .pass-privacy { color: var(--muted); font-size: 13px; }
+.pass-privacy { display: flex; align-items: flex-start; gap: 8px; }
+.pass-privacy svg { margin-top: 3px; color: var(--emerald); }
+.proof-footnote { margin-top: 16px; }
+.receipt-result { margin-top: 16px; }
+.receipt-result .verdict-banner { margin: 0 0 12px; }
+.verdict-banner h2 { font: 700 clamp(18px, 3vw, 24px)/1.35 system-ui, sans-serif; }
+.verdict-banner p { font-size: 14px; line-height: 1.6; }
+
+.panel.disclosure { padding: 0; margin-top: 14px; }
+.disclosure > summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 56px; padding: 12px 16px; font-size: 14px; font-weight: 650; list-style: none; }
+.disclosure > summary::-webkit-details-marker { display: none; }
+.disclosure > summary > svg { color: var(--green); }
+.disclosure[open] > summary > svg:last-child { transform: rotate(90deg); }
+.disclosure-body { display: grid; align-items: start; gap: 16px; min-width: 0; padding: 16px; border-top: 1px solid var(--line); }
+.disclosure-body .issuer-panel, .disclosure-body .sample-reference, .disclosure-body .inline-notice { margin-top: 0; }
+.lookup-panel > .inline-notice { margin-bottom: 14px; color: var(--amber); }
+.proof-status { display: grid; gap: 4px; color: var(--muted); }
+.proof-status strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.clinic-completion { display: grid; align-items: start; gap: 16px; max-width: 580px; margin-inline: auto; }
+.clinic-completion > .alert, .clinic-completion > .disclosure { margin: 0; }
+.clinic-proof .export-buttons, .clinic-proof .explorer-link { margin: 0; }
+.patient-pass { display: grid; justify-items: start; gap: 14px; }
+.pass-intro { display: grid; gap: 6px; }
+.pass-intro p { color: var(--muted); }
+.pass-face { width: 100%; min-width: 0; border: 1px solid var(--line-strong); background: var(--paper); }
+.pass-strip { padding: 13px 10px; background: var(--green); color: #fff; font-size: clamp(15px, 4vw, 22px); font-weight: 800; line-height: 1.35; text-align: center; letter-spacing: .03em; }
+.pass-matrix { display: grid; justify-items: center; padding: 12px; }
+.pass-matrix canvas { display: block; }
+.pass-facts { display: grid; width: 100%; gap: 0; font-size: 14px; font-variant-numeric: tabular-nums; }
+.pass-face > .pass-facts { padding-inline: 14px; }
+.pass-facts > div { display: grid; grid-template-columns: minmax(72px, .65fr) minmax(0, 1fr); align-items: baseline; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+.pass-facts dt { color: var(--muted); }
+.pass-facts dd { font-weight: 650; text-align: end; }
+.pass-site { padding: 4px 12px 13px; color: var(--green); font-size: 13px; font-weight: 750; text-align: center; }
+
+@media (min-width: 520px) {
+  .scan-actions, .pass-actions, .clinic-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .disclosure > summary, .disclosure-body { padding-inline: 20px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }

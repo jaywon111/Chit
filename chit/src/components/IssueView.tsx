@@ -1,11 +1,11 @@
-import { useRef, useState, type FormEvent } from "react";
-import { QRCodeSVG } from "qrcode.react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Icon } from "./Icon.js";
+import { PatientReceiptPass } from "./PatientReceiptPass.js";
 import { ReceiptFieldsForm } from "./ReceiptFieldsForm.js";
 import { anchorReceipt, AnchorSubmissionUnknownError, SubmittedAnchorError, type WalletConnection } from "../lib/qorex.js";
 import { CHAIN_ID, EXPLORER_URL, explorerTxUrl } from "../lib/network.js";
 import { clearPendingReceipt, createReceiptRecord, ensureReceiptStorage, generateReceiptCode, hashReceipt, loadPendingReceipts, loadReceipts, newReceipt, normalizeReceipt, savePendingReceipt, saveReceipt, serializePendingReceipt, serializeReceipt, type PendingReceipt, type ReceiptFields, type ReceiptRecord } from "../lib/receipt.js";
-import { copyText, downloadQR, downloadText } from "../lib/export.js";
+import { copyText, downloadText } from "../lib/export.js";
 import { useReceiptHash } from "../lib/useReceiptHash.js";
 import { createVerificationLink } from "../lib/share.js";
 
@@ -25,7 +25,7 @@ export function IssueView({ wallet, connect, knownCodes, pendingReceipts, onRefr
 }): JSX.Element {
   const [draft, setDraft] = useState<ReceiptFields>(() => initialReceipt(knownCodes));
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
-  const [phase, setPhase] = useState<"idle" | "hashing" | "wallet" | "broadcasting" | "submitted" | "unknown">("idle");
+  const [phase, setPhase] = useState<"idle" | "hashing" | "wallet" | "broadcasting" | "submitted" | "unconfirmed" | "unknown">("idle");
   const [issued, setIssued] = useState<ReceiptRecord | null>(null);
   const [unresolved, setUnresolved] = useState<PendingReceipt | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,9 +33,17 @@ export function IssueView({ wallet, connect, knownCodes, pendingReceipts, onRefr
   const [copyNotice, setCopyNotice] = useState("");
   const [saved, setSaved] = useState(false);
   const locked = useRef(false);
+  const heading = useRef<HTMLHeadingElement>(null);
   const hash = useReceiptHash(draft);
   const busy = phase === "hashing" || phase === "wallet" || phase === "broadcasting";
   const finished = issued !== null || unresolved !== null;
+  useEffect(() => {
+    const target = heading.current;
+    if (finished && target?.getClientRects().length) {
+      target.focus({ preventScroll: true });
+      target.scrollIntoView({ block: "start" });
+    }
+  }, [finished]);
 
   function freshCode(): void {
     try {
@@ -57,7 +65,7 @@ export function IssueView({ wallet, connect, knownCodes, pendingReceipts, onRefr
     const record = createReceiptRecord(receipt, receiptHash, txHash);
     // Set recovery output before touching storage; a quota failure must not hide
     // a real transaction hash or trigger a second wallet transaction.
-    setIssued(record); setPhase("submitted"); setError(notice ?? null);
+    setIssued(record); setPhase(notice === undefined ? "submitted" : "unconfirmed"); setError(notice ?? null);
     try {
       saveReceipt(record); setSaved(true);
       clearPendingReceipt(record.receipt.receiptCode, undefined, record);
@@ -113,74 +121,84 @@ export function IssueView({ wallet, connect, knownCodes, pendingReceipts, onRefr
     } catch (err) { setCopyNotice(err instanceof Error ? err.message : "Could not copy JSON."); }
   }
 
-  async function copyVerificationLink(): Promise<void> {
-    if (!issued) return;
-    try { await copyText(createVerificationLink(issued)); setCopyNotice("Self-contained verification link copied. It contains only the five receipt fields and transaction hash."); }
-    catch (err) { setCopyNotice(err instanceof Error ? err.message : "Could not copy the verification link. Export JSON instead."); }
-  }
-
-  const progressText = phase === "hashing" ? "Computing SHA-256…" : phase === "wallet" ? "Connecting QoreX…" : phase === "broadcasting" ? "Confirm the hybrid transaction in QoreX…" : "";
-  const ticketReceipt = issued?.receipt ?? unresolved?.receipt ?? draft;
-  const ticketHash = issued?.receiptHash ?? unresolved?.receiptHash ?? hash.hash;
+  const progressText = phase === "hashing" ? "Preparing the receipt…" : phase === "wallet" ? "Connecting to QoreX…" : "Approve the receipt in QoreX…";
+  const confirmed = phase === "submitted";
   let verificationLink: string | null = null;
-  let linkError: string | null = null;
-  try { if (issued) verificationLink = createVerificationLink(issued); }
-  catch (err) { linkError = err instanceof Error ? err.message : "Verification link unavailable. Keep the exported JSON."; }
+  try { if (issued && confirmed) verificationLink = createVerificationLink(issued); }
+  catch { /* The receipt and its proof remain exportable below. */ }
 
   return <section className="page issue-page" aria-labelledby="issue-heading">
-    <div className="page-heading">
-      <div><div className="eyebrow">ISSUANCE / HASH COMMITMENT</div><h1 id="issue-heading">Issue a receipt<span className="heading-period">.</span></h1><p>Controlled parameters. Local SHA-256. One QoreX hybrid-signed anchor.</p></div>
-      <span className="instrument-tag"><Icon name="lock" size={15} /> HASH ONLY / ON-CHAIN</span>
-    </div>
-    <div className="instrument-metrics" aria-label="Receipt protocol specifications"><div><span>RECEIPT SCHEMA</span><strong>v1 <small>/ 5 fields</small></strong></div><div><span>COMMITMENT</span><strong>SHA-256 <small>/ 32 B</small></strong></div><div><span>SIGNING LANE</span><strong>Hybrid <small>/ 1 tx</small></strong></div></div>
+    <div className="page-heading"><div>
+      <p className="eyebrow">For clinics and labs</p>
+      <h1 id="issue-heading" ref={heading} tabIndex={-1}>{issued ? confirmed ? "Receipt ready" : "Check this receipt" : unresolved ? "Find this receipt" : "Issue a pass"}<span className="heading-period">.</span></h1>
+      {!finished && <p>Create an imaging receipt in QoreX, then share the pass with your patient.</p>}
+    </div></div>
 
-    <div className="issue-grid">
-      <form className="panel receipt-panel" onSubmit={(event) => { void issue(event); }}>
-        <div className="panel-heading"><div><div className="section-number">CONTROLLED INPUT / ZERO PII</div><h2>Receipt parameters</h2><p>Non-identifying descriptors only.</p></div><span className="panel-icon"><Icon name="receipt" size={23} /></span></div>
-        <div className="code-tools"><span><span className="status-dot" /> Generated on your device</span><button className="text-button" type="button" onClick={freshCode} disabled={busy || finished}><Icon name="refresh" size={14} /> New code</button></div>
-        <ReceiptFieldsForm value={draft} onChange={setDraft} disabled={busy || finished} idPrefix="issue" />
-        <div className="privacy-box"><Icon name="lock" size={19} /><div><strong>Data boundary</strong><p>Never enter patient identifiers, names, diagnoses, medical images, or phone numbers. Only the hash goes on-chain. Receipt JSON and shared links are plaintext.</p></div></div>
-        <label className="consent-check"><input type="checkbox" checked={privacyAccepted} onChange={(event) => setPrivacyAccepted(event.target.checked)} disabled={busy || finished} /><span>I’m using only generic, non-identifying receipt fields.</span></label>
-        {(error || hash.error) && <div className="alert error-alert" role="alert"><Icon name="alert" size={19} /><span>{error || hash.error}</span></div>}
-        {storageNotice && <div className="alert warning-alert" role="alert"><Icon name="download" size={19} /><span>{storageNotice}</span></div>}
-        <div className="form-actions">
-          {issued ? <button type="button" className="button primary" onClick={() => onVerify(issued)}><Icon name="shield" /> Verify this Chit <Icon name="arrow" size={18} /></button> : <button type="submit" className="button primary" disabled={busy || finished || !privacyAccepted || !!hash.error}>{busy ? <span className="spinner" /> : <Icon name={wallet ? "receipt" : "wallet"} />}{busy ? progressText : unresolved ? "Submission needs recovery" : wallet ? "Issue Chit" : "Connect QoreX & issue"}{!busy && !finished && <Icon name="arrow" size={18} />}</button>}
-          {finished && <button className="button secondary" type="button" onClick={startNew}><Icon name="plus" size={17} /> Create a new Chit</button>}
-        </div>
-        <p className="fee-note"><Icon name="info" size={15} /><span>One native hybrid-signed transaction: 1 uqor (0.000001 QOR) back to your own wallet, plus the gas fee shown by QoreX. An existing ML-DSA-87 registration is required; Chit never bootstraps it.</span></p>
-      </form>
-
-      <aside className="preview-column" aria-label="Receipt preview and export">
-        <div className={`ticket ${issued ? "ticket-issued" : ""}`}>
-          <div className="ticket-registration" aria-hidden="true"><span>+</span><span>+</span></div>
-          <div className="ticket-top"><span className="ticket-brand">chit<span>.</span></span><div className="ticket-tracking"><span>CRYPTOGRAPHIC RECEIPT</span><strong>SCHEMA v1 / DIANA</strong></div><span className="ticket-status">{issued ? "SUBMITTED" : unresolved ? "UNRESOLVED" : "DRAFT"}</span></div>
-          <div className="ticket-code"><span>RECOVERY SERIAL / SPECIMEN TICKET</span><strong>{ticketReceipt.receiptCode}</strong><p>{issued ? "Submission retained. Verify live chain evidence before relying on this receipt." : unresolved ? "Uncertain outcome. Recover the transaction hash; do not rebroadcast." : "PREVIEW / NOT AN ISSUED OR VERIFIED RECEIPT"}</p></div>
-          <div className="ticket-divider" />
-          {issued && verificationLink ? <><div className="qr-wrap"><QRCodeSVG id="issued-chit-qr" value={verificationLink} size={280} level="M" marginSize={4} bgColor="#ffffff" fgColor="#171c1a" title={`Chit ${issued.receipt.receiptCode} self-contained verification link`} /></div><p className="qr-caption">SCAN TO VERIFY / NO WALLET REQUIRED<br /><span>Receipt fields + transaction hash. Nothing uploaded.</span></p></> : <div className="preview-qr-placeholder"><span><Icon name={unresolved ? "clock" : "qr"} size={38} /></span><p>{issued ? "QR link unavailable — export receipt JSON" : unresolved ? "AWAITING TRANSACTION HASH" : "QR GENERATED AFTER SUBMISSION"}</p><small>{issued ? "The real transaction hash remains exportable below." : "No fabricated transaction or signature."}</small></div>}
-          <dl className="ticket-fields"><div><dt>CATEGORY</dt><dd>{ticketReceipt.scanCategory}</dd></div><div><dt>VISIT DATE</dt><dd>{ticketReceipt.visitDate || "Not set"}</dd></div><div><dt>FACILITY TAG</dt><dd>{ticketReceipt.facilityTag || "Not set"}</dd></div><div><dt>VIEW / CONTEXT</dt><dd>{ticketReceipt.note || "Not specified"}</dd></div></dl>
-          <div className="ticket-hash"><div><Icon name="hash" size={14} /> SHA-256 COMMITMENT <span>32 B</span></div><code>{ticketHash ?? (hash.error ? "Waiting for valid receipt fields" : "Computing locally…")}</code><small>CHIT:v1 / canonical five-field JSON</small></div>
-          <div className="ticket-attestation"><Icon name="shield" size={19} /><div><span>{issued ? "SIGNATURE SPECIFICATION / VERIFY ON-CHAIN" : "REQUIRED SIGNATURE SPECIFICATION"}</span><strong>NIST FIPS 204 · ML-DSA-87 · 4,627 B</strong><small>Hybrid with secp256k1. A badge is not verification.</small></div></div>
-          <div className="ticket-footer"><span>{CHAIN_ID}</span><span>HASH INTEGRITY / NOT CLINICAL TRUTH</span></div>
-        </div>
-
-        {issued && <div className="export-panel">
-          <div className={`local-save-status ${saved ? "" : "save-warning"}`}><Icon name={saved ? "check" : "alert"} size={17} /><span>{saved ? "Saved on this browser · recover by code" : "Export now to preserve your receipt"}</span></div>
-          <button className="button ink-button full-width" type="button" disabled={!verificationLink} onClick={() => { void copyVerificationLink(); }}><Icon name="copy" size={17} /> Copy Verification Link <Icon name="arrow" size={16} /></button>
-          {linkError && <p className="metadata-warning" role="alert">{linkError}</p>}
-          <div className="export-buttons"><button className="button secondary" type="button" onClick={() => { void copyJSON(); }}><Icon name="copy" size={16} /> Copy receipt JSON</button><button className="button secondary" type="button" onClick={() => downloadText(`${issued.receipt.receiptCode}.json`, serializeReceipt(issued, true))}><Icon name="download" size={16} /> Save JSON</button></div>
-          <button className="button subtle full-width" type="button" onClick={() => { try { downloadQR("issued-chit-qr", issued.receipt.receiptCode); } catch (err) { setCopyNotice(err instanceof Error ? err.message : "Could not download QR."); } }}><Icon name="qr" size={16} /> Save QR image</button>
-          <a className="explorer-link" href={explorerTxUrl(issued.txHash)} target="_blank" rel="noreferrer">View transaction in Explorer <Icon name="external" size={15} /></a><small className="explorer-hint">Select <strong>Testnet</strong> in Explorer.</small>
-          <details className="json-details"><summary>Receipt JSON & transaction hash</summary><textarea readOnly value={serializeReceipt(issued, true)} rows={10} aria-label="Issued receipt JSON" spellCheck={false} /><p className="breakable"><strong>txHash:</strong> {issued.txHash}</p></details>
+    {issued ? <div className="clinic-completion">
+      {confirmed && verificationLink && <PatientReceiptPass key={issued.txHash} receipt={issued.receipt} verificationLink={verificationLink} />}
+      {(!confirmed || !verificationLink) && <div className="alert warning-alert" role="alert"><Icon name="alert" size={19} /><span>{confirmed ? "We couldn’t create the pass link. You can still check or export the receipt below." : "The wallet returned a reference, but Chit couldn’t confirm the receipt. Check it before sharing. Don’t send it again."}</span></div>}
+      {(storageNotice || (confirmed && error)) && <div className="alert warning-alert" role="alert"><Icon name="alert" size={19} /><span>{storageNotice ? "The receipt archive may not have been updated. Keep a copy of the pass or export the receipt below." : error}</span></div>}
+      <div className="clinic-actions">
+        <button type="button" className="button secondary" onClick={() => onVerify(issued)}><Icon name="shield" size={18} /> Check this receipt</button>
+        <button type="button" className="button secondary" onClick={startNew}><Icon name="plus" size={18} /> Issue another pass</button>
+      </div>
+      <details className="panel disclosure clinic-proof">
+        <summary><Icon name="shield" size={18} /><span>Cryptographic Proof</span><Icon name="chevron" size={16} /></summary>
+        <div className="disclosure-body">
+          <p>{saved ? "Receipt saved in this browser. Keep a copy before clearing browser data." : "Export a copy to keep this receipt."}</p>
+          {!confirmed && error && <p>{error}</p>}
+          <dl className="proof-facts"><div><dt>Network</dt><dd>{CHAIN_ID}</dd></div><div><dt>Receipt SHA-256</dt><dd>{issued.receiptHash}</dd></div><div><dt>Transaction hash</dt><dd>{issued.txHash}</dd></div></dl>
+          <div className="field"><label htmlFor="issued-json">Receipt JSON</label><textarea id="issued-json" readOnly value={serializeReceipt(issued, true)} rows={9} spellCheck={false} /></div>
+          <div className="export-buttons">
+            <button className="button secondary" type="button" onClick={() => { void copyJSON(); }}><Icon name="copy" size={16} /> Copy receipt JSON</button>
+            <button className="button secondary" type="button" onClick={() => downloadText(`${issued.receipt.receiptCode}.json`, serializeReceipt(issued, true))}><Icon name="download" size={16} /> Save JSON</button>
+          </div>
+          <a className="explorer-link" href={explorerTxUrl(issued.txHash)} target="_blank" rel="noreferrer">View transaction in Explorer (Testnet) <Icon name="external" size={15} /></a>
           {copyNotice && <p className="inline-notice" role="status">{copyNotice}</p>}
-        </div>}
-
-        {unresolved && <div className="export-panel unresolved-panel"><h3><Icon name="clock" size={18} /> Saved draft, not verified proof</h3><p>QoreX may have broadcast the anchor. Recover the real transaction hash; do not blindly reissue.</p><button className="button secondary full-width" type="button" onClick={() => onVerify(unresolved)}>Recover & verify <Icon name="arrow" size={16} /></button><div className="export-buttons"><button className="button subtle" type="button" onClick={() => { void copyJSON(); }}><Icon name="copy" size={15} /> Copy draft</button><button className="button subtle" type="button" onClick={() => downloadText(`${unresolved.receipt.receiptCode}-pending.json`, serializePendingReceipt(unresolved))}><Icon name="download" size={15} /> Save draft</button></div>{copyNotice && <p role="status" className="inline-notice">{copyNotice}</p>}</div>}
-
-        {!finished && <div className="quiet-card"><span className="soft-icon small"><Icon name="shield" size={18} /></span><div><h3>A receipt, not a medical record.</h3><p>The QR contains only the five receipt fields and proof metadata. The chain contains only the hash—not those fields.</p></div></div>}
+        </div>
+      </details>
+    </div> : unresolved ? <div className="clinic-completion">
+      <section className="panel clinic-help">
+        <h2>Receipt {unresolved.receipt.receiptCode} still needs checking</h2>
+        <p>QoreX may have sent the receipt. Look for its reference in QoreX history before trying anything again.</p>
+        <div className="clinic-actions">
+          <button className="button primary" type="button" onClick={() => onVerify(unresolved)}>Find and check receipt <Icon name="arrow" size={16} /></button>
+          <button className="button secondary" type="button" onClick={startNew}>Issue a different pass</button>
+        </div>
+      </section>
+      <details className="panel disclosure clinic-proof">
+        <summary><Icon name="info" size={18} /><span>Recovery details</span><Icon name="chevron" size={16} /></summary>
+        <div className="disclosure-body">
+          {error && <p>{error}</p>}
+          <div className="export-buttons">
+            <button className="button secondary" type="button" onClick={() => { void copyJSON(); }}><Icon name="copy" size={16} /> Copy draft JSON</button>
+            <button className="button secondary" type="button" onClick={() => downloadText(`${unresolved.receipt.receiptCode}-pending.json`, serializePendingReceipt(unresolved))}><Icon name="download" size={16} /> Save draft JSON</button>
+          </div>
+          {copyNotice && <p className="inline-notice" role="status">{copyNotice}</p>}
+        </div>
+      </details>
+    </div> : <div className="issue-grid">
+      <form className="panel receipt-panel" onSubmit={(event) => { void issue(event); }}>
+        <div className="panel-heading"><div><h2>Receipt details</h2><p>Use only generic details that don’t identify the patient.</p></div><span className="panel-icon"><Icon name="receipt" size={23} /></span></div>
+        <div className="code-tools"><span><span className="status-dot" /> Receipt ID created on this device</span><button className="text-button" type="button" onClick={freshCode} disabled={busy}><Icon name="refresh" size={15} /> New ID</button></div>
+        <ReceiptFieldsForm value={draft} onChange={setDraft} disabled={busy} idPrefix="issue" />
+        <div className="privacy-box"><Icon name="lock" size={19} /><div><strong>Keep patient details out of the pass</strong><p>Never enter names, phone numbers, patient IDs, diagnoses or medical images. Anyone with the pass can read these receipt details.</p></div></div>
+        <label className="consent-check"><input type="checkbox" checked={privacyAccepted} onChange={(event) => setPrivacyAccepted(event.target.checked)} disabled={busy} /><span>I’ve used only generic details that don’t identify a patient.</span></label>
+        {(error || hash.error) && <div className="alert error-alert" role="alert"><Icon name="alert" size={19} /><span>{error || hash.error}</span></div>}
+        <div className="form-actions"><button type="submit" className="button primary" disabled={busy || !privacyAccepted || !!hash.error}>{busy ? <span className="spinner" aria-hidden="true" /> : <Icon name={wallet ? "receipt" : "wallet"} />}{busy ? progressText : wallet ? "Issue pass" : "Connect QoreX and issue pass"}</button></div>
+        <p className="fee-note"><Icon name="info" size={16} /><span>QoreX shows the network fee before you approve.</span></p>
+      </form>
+      <aside className="panel clinic-help">
+        <h2>What the patient gets</h2>
+        <p>A QR pass they can save, share, or check without a wallet. Only a digital fingerprint of the receipt is recorded on-chain.</p>
+        <details className="canonical-inspector"><summary>Cryptographic Proof<Icon name="chevron" size={16} /></summary><div>
+          <p>QoreX signs one 1-uqor self-transfer on {CHAIN_ID}, plus the fee shown by the wallet. An existing ML-DSA-87 registration is required.</p>
+          <p><strong>NIST FIPS 204 · ML-DSA-87 · 4,627 B</strong> · Hybrid with secp256k1</p>
+          <p>Draft SHA-256: <code>{hash.hash ?? "Waiting for valid receipt details"}</code></p>
+        </div></details>
       </aside>
-    </div>
+    </div>}
 
-    {pendingReceipts.length > 0 && <div className="pending-banner"><Icon name="clock" size={20} /><div><strong>{pendingReceipts.length} unresolved {pendingReceipts.length === 1 ? "submission" : "submissions"} saved on this browser</strong><p>A saved draft is not evidence of success. Recover the transaction hash in QoreX or <a href={EXPLORER_URL} target="_blank" rel="noreferrer">Explorer (Testnet)</a>.</p><div className="saved-chips">{pendingReceipts.map((record) => <button key={record.receipt.receiptCode} type="button" onClick={() => onVerify(record)}>{record.receipt.receiptCode}<Icon name="arrow" size={13} /></button>)}</div></div></div>}
-    <div className="page-footnote"><span><Icon name="lock" size={14} /> No patient data collected</span><span><Icon name="globe" size={14} /> {CHAIN_ID}</span><span><Icon name="hash" size={14} /> SHA-256, computed locally</span></div>
+    {pendingReceipts.length > 0 && <div className="pending-banner"><Icon name="clock" size={20} /><div><strong>{pendingReceipts.length} saved {pendingReceipts.length === 1 ? "draft needs" : "drafts need"} checking</strong><p>Find the receipt reference in QoreX or in <a href={EXPLORER_URL} target="_blank" rel="noreferrer">Explorer (Testnet)</a>. A draft is not proof that the pass was issued.</p><div className="saved-chips">{pendingReceipts.map((record) => <button key={record.receipt.receiptCode} type="button" onClick={() => onVerify(record)}>{record.receipt.receiptCode}<Icon name="arrow" size={13} /></button>)}</div></div></div>}
   </section>;
 }
